@@ -1,0 +1,55 @@
+{******************************************************************************}
+{                                                                              }
+{  FluentORM                                                                   }
+{  --------------------------------------------------------------------------  }
+{  Minimalist and high-performance Micro ORM for Delphi                        }
+{                                                                              }
+{  Author: Osmanito Torres                                                     }
+{                                                                              }
+{  Description:                                                                }
+{    FluentORM is a lightweight and efficient micro-ORM designed to provide    }
+{    type-safe CRUD operations, SQL generation, and metadata-based mapping     }
+{    for Delphi applications. It emphasizes simplicity, performance, and       }
+{    explicit behavior over hidden abstractions.                               }
+{                                                                              }
+{    The framework includes:                                                   }
+{      - Fluent SQL Builder                                                    }
+{      - Generic Repository pattern                                            }
+{      - Metadata caching via RTTI                                             }
+{      - Transaction support                                                   }
+{      - Multi-database dialect handling                                       }
+{                                                                              }
+{  Disclaimer:                                                                 }
+{    This software is provided "as is", without warranty of any kind,          }
+{    express or implied, including but not limited to the warranties of        }
+{    merchantability, fitness for a particular purpose and noninfringement.    }
+{                                                                              }
+{    The author assumes no responsibility or liability for any damages         }
+{    arising from the use of this component in any environment, including      }
+{    production systems. Use at your own risk.                                 }
+{                                                                              }
+{  Notes:                                                                      }
+{    This component was designed with a minimalist philosophy and does not     }
+{    aim to replicate the complexity of full-scale ORM frameworks.             }
+{                                                                              }
+{******************************************************************************}
+
+unit uFluentORM.Types;
+
+interface
+
+uses
+  System.Variants;
+
+type
+  TSQLParam = record
+    Name: string;
+    Value: Variant;
+  end;
+
+  TSQLParams = TArray<TSQLParam>;
+
+implementation
+
+end.
+

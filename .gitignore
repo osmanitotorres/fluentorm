@@ -1,0 +1,56 @@
+# Delphi / RAD Studio
+*.dcu
+*.dcp
+*.dcpil
+*.bpl
+*.bpi
+*.lib
+*.tds
+*.rsm
+*.map
+*.drc
+*.local
+*.identcache
+*.stat
+*.projdata
+*.deployproj
+*.tvsconfig
+*.skincfg
+*.otares
+
+# Executaveis e artefatos
+*.exe
+*.dll
+*.ocx
+*.apk
+*.ipa
+*.app
+*.so
+*.a
+*.o
+*.obj
+
+# Recursos gerados
+*.res
+*.dsk
+*.~*
+*.bak
+*.tmp
+*.log
+
+# Pastas de compilacao comuns
+Win32/
+Win64/
+Debug/
+Release/
+__history/
+__recovery/
+
+# VS Code / IDEs
+.vscode/
+.idea/
+
+# Arquivos de sistema
+.DS_Store
+Thumbs.db
+desktop.ini
