@@ -50,6 +50,11 @@ type
     function ExecuteScalar(const ASQL: string; const AParams: TSQLParams): Variant;
   end;
 
+  ISQLDriverInfo = interface(ISQLExecutor)
+    ['{8B9700E9-0D93-4E32-92F8-BA13E4CF3D3E}']
+    function GetDriverID: string;
+  end;
+
   ISQLTransactionalExecutor = interface(ISQLExecutor)
     ['{FBAA3D34-F2FA-4787-B122-B177E0DE37A8}']
     procedure BeginTransaction;

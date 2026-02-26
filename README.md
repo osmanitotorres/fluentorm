@@ -1037,7 +1037,7 @@ end;
 - A partir do GRUPO 11, `Intersect/Except` cobrem os operadores de conjunto mais usados em SQL relacional.
 - A partir do GRUPO 12, `WithCTE/WithRecursiveCTE` permitem estruturar consultas complexas mantendo composicao fluente.
 - Dica de uso: inicie com `Select` e depois aplique `WithCTE/WithRecursiveCTE` na mesma cadeia.
-- Para `Insert` com chave auto-gerada, o executor FireDAC usa SQL especifica por driver (`LAST_INSERT_ID`, `SCOPE_IDENTITY`, etc.).
+- Para `Insert` com chave auto-gerada, em PostgreSQL o `Repository` usa `INSERT ... RETURNING <pk>`; nos demais bancos o executor FireDAC usa SQL especifica por driver (`LAST_INSERT_ID`, `SCOPE_IDENTITY`, etc.).
 - Seguranca adicional: `WhereNotBetween` nao usa mais caminho raw interno (suporta parametros nomeados).
 - Em `StrictMode`, `FromSQL` e `OrderByRaw` tambem sao bloqueados.
 - Em `StrictMode`, `OrderBy('campo, outro DESC')` continua permitido para identificadores simples.

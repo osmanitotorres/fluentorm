@@ -51,7 +51,7 @@ type
     function CreateConnection: TFDConnection;
   end;
 
-  TFireDACSQLExecutor = class(TInterfacedObject, ISQLExecutor, ISQLTransactionalExecutor, ISQLIdentityExecutor)
+  TFireDACSQLExecutor = class(TInterfacedObject, ISQLExecutor, ISQLDriverInfo, ISQLTransactionalExecutor, ISQLIdentityExecutor)
   private
     FConnection: TFDConnection;
     FOwnsConnection: Boolean;
@@ -63,6 +63,7 @@ type
     destructor Destroy; override;
     function Execute(const ASQL: string; const AParams: TSQLParams): Integer;
     function ExecuteScalar(const ASQL: string; const AParams: TSQLParams): Variant;
+    function GetDriverID: string;
     function GetLastInsertedId: Variant;
     procedure BeginTransaction;
     procedure Commit;
@@ -175,7 +176,7 @@ function TFireDACSQLExecutor.GetLastInsertedId: Variant;
 var
   DriverID: string;
 begin
-  DriverID := UpperCase(Trim(FConnection.Params.Values['DriverID']));
+  DriverID := GetDriverID;
 
   if DriverID = 'MYSQL' then
     Exit(ExecuteScalarNoParams('SELECT LAST_INSERT_ID()'));
@@ -190,6 +191,11 @@ begin
     Exit(ExecuteScalarNoParams('SELECT last_insert_rowid()'));
 
   Exit(ExecuteScalarNoParams('SELECT @@IDENTITY'));
+end;
+
+function TFireDACSQLExecutor.GetDriverID: string;
+begin
+  Result := UpperCase(Trim(FConnection.Params.Values['DriverID']));
 end;
 
 procedure TFireDACSQLExecutor.BeginTransaction;

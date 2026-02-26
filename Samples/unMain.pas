@@ -161,7 +161,7 @@ var
 begin
   SQL := TSQLBuilder.Create;
   try
-    SQL.SetDatabaseType(dbMySQL);
+    SQL.SetDatabaseType(dbPostgreSQL);  //dbMySQL  dbPostgreSQL   dbMSSQL
 
     DataInicio := EncodeDate(2024, 1, 1);
     DataFim := EncodeDate(2024, 12, 31);
@@ -201,16 +201,11 @@ begin
                      'p.nome',
                      'p.categoria'
                    ])
-                   .Having('valor_total', 1000, opGreaterOrEqual)
+                   .Having('SUM(iv.quantidade * iv.preco_unitario)', 1000, opGreaterOrEqual)
                    .OrderByDesc('v.nome, valor_total DESC')
                    .ToFormattedSQL(4);
 
-    Memo1.Lines.Add('=== RELATÓRIO CORRIGIDO (SEM OPERADORES DUPLICADOS) ===');
     Memo1.Lines.Add(QuerySQL);
-    // Resultado esperado:
-    // WHERE pe.data_pedido >= 45292 AND pe.data_pedido <= 45657 ...
-    // HAVING valor_total >= 1000 ...
-
   finally
     SQL.Free;
   end;
