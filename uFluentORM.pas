@@ -1996,6 +1996,7 @@ end;
 function TSQLBuilder.BuildOrderByClause: string;
 var
   I: Integer;
+  UField: string;
 begin
   if FOrderByFields.Count = 0 then
   begin
@@ -2010,9 +2011,9 @@ begin
     if I > 0 then
       Result := Result + ', ';
     Result := Result + FOrderByFields[I].Field;
-    
-    if (Pos('ASC', UpperCase(FOrderByFields[I].Field)) = 0) and
-       (Pos('DESC', UpperCase(FOrderByFields[I].Field)) = 0) then
+
+    UField := UpperCase(Trim(FOrderByFields[I].Field));
+    if (not EndsText(' ASC', UField)) and (not EndsText(' DESC', UField)) then
     begin
       if FOrderByFields[I].Direction = odDesc then
         Result := Result + ' DESC'

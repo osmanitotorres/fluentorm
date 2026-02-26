@@ -51,12 +51,15 @@ type
   private
     FExecutor: ISQLExecutor;
     FMeta: TOrmEntityMeta;
+    class function IsSimpleIdentifier(const AValue: string): Boolean; static;
+    class function QuoteIdentifierForDriver(const AIdentifier, ADriverID: string): string; static;
+    class function IsInvalidKeyValue(const AValue: Variant): Boolean; static;
     class function ValueToVariant(const AValue: TValue): Variant; static;
     function GetEntityValue(AEntity: T; const APropMeta: TOrmPropertyMeta): Variant;
     procedure SetEntityValue(AEntity: T; const APropMeta: TOrmPropertyMeta;
       const AValue: Variant);
     function BuildInsertSQL(AEntity: T; out AParams: TSQLParams;
-      const AReturningColumn: string = ''): string;
+      const AReturningColumn: string = ''; AUseDefaultValues: Boolean = False): string;
     function BuildUpdateSQL(AEntity: T; out AParams: TSQLParams): string;
     function BuildDeleteSQL(const AId: Variant; out AParams: TSQLParams): string;
   public
@@ -72,6 +75,49 @@ type
 implementation
 
 { TRepository<T> }
+
+class function TRepository<T>.IsSimpleIdentifier(const AValue: string): Boolean;
+var
+  I: Integer;
+  C: Char;
+begin
+  Result := Trim(AValue) <> '';
+  if not Result then
+    Exit;
+
+  C := AValue[1];
+  if not ((C in ['A'..'Z']) or (C in ['a'..'z']) or (C = '_')) then
+    Exit(False);
+
+  for I := 2 to Length(AValue) do
+  begin
+    C := AValue[I];
+    if not ((C in ['A'..'Z']) or (C in ['a'..'z']) or (C in ['0'..'9']) or (C = '_')) then
+      Exit(False);
+  end;
+
+  Result := True;
+end;
+
+class function TRepository<T>.QuoteIdentifierForDriver(const AIdentifier,
+  ADriverID: string): string;
+begin
+  if (UpperCase(Trim(ADriverID)) = 'PG') and IsSimpleIdentifier(Trim(AIdentifier)) then
+    Result := '"' + Trim(AIdentifier) + '"'
+  else
+    Result := Trim(AIdentifier);
+end;
+
+class function TRepository<T>.IsInvalidKeyValue(const AValue: Variant): Boolean;
+begin
+  if VarIsNull(AValue) or VarIsEmpty(AValue) then
+    Exit(True);
+
+  if VarIsStr(AValue) then
+    Exit(Trim(VarToStr(AValue)) = '');
+
+  Result := False;
+end;
 
 class function TRepository<T>.ValueToVariant(const AValue: TValue): Variant;
 begin
@@ -137,10 +183,17 @@ begin
 
   Kind := APropMeta.PropertyInfo.PropertyType.TypeKind;
   case Kind of
-    tkInteger, tkInt64:
-      APropMeta.PropertyInfo.SetValue(TObject(AEntity), TValue.From<Int64>(AValue));
+    tkInteger:
+      APropMeta.PropertyInfo.SetValue(TObject(AEntity), TValue.From<Integer>(VarAsType(AValue, varInteger)));
+    tkInt64:
+      APropMeta.PropertyInfo.SetValue(TObject(AEntity), TValue.From<Int64>(VarAsType(AValue, varInt64)));
     tkFloat:
-      APropMeta.PropertyInfo.SetValue(TObject(AEntity), TValue.From<Double>(AValue));
+      begin
+        if SameText(APropMeta.PropertyInfo.PropertyType.Name, 'TDateTime') then
+          APropMeta.PropertyInfo.SetValue(TObject(AEntity), TValue.From<TDateTime>(VarToDateTime(AValue)))
+        else
+          APropMeta.PropertyInfo.SetValue(TObject(AEntity), TValue.From<Double>(AValue));
+      end;
     tkUString, tkString, tkLString, tkWString:
       APropMeta.PropertyInfo.SetValue(TObject(AEntity), TValue.From<string>(VarToStr(AValue)));
     tkEnumeration:
@@ -154,7 +207,7 @@ begin
 end;
 
 function TRepository<T>.BuildInsertSQL(AEntity: T; out AParams: TSQLParams;
-  const AReturningColumn: string): string;
+  const AReturningColumn: string; AUseDefaultValues: Boolean): string;
 var
   P: TOrmPropertyMeta;
   Fields: string;
@@ -188,7 +241,10 @@ begin
   end;
 
   AParams := ParamList;
-  Result := Format('INSERT INTO %s (%s) VALUES (%s)', [FMeta.TableName, Fields, Values]);
+  if (Fields = '') and AUseDefaultValues then
+    Result := Format('INSERT INTO %s DEFAULT VALUES', [FMeta.TableName])
+  else
+    Result := Format('INSERT INTO %s (%s) VALUES (%s)', [FMeta.TableName, Fields, Values]);
   if Trim(AReturningColumn) <> '' then
     Result := Result + ' RETURNING ' + AReturningColumn;
 end;
@@ -200,11 +256,17 @@ var
   ParamList: TArray<TSQLParam>;
   ParamName: string;
   KeyMeta: TOrmPropertyMeta;
+  KeyValue: Variant;
 begin
   if not FMeta.HasKey then
     raise Exception.CreateFmt('Entity %s has no key. Cannot update.', [FMeta.EntityClass.ClassName]);
 
   KeyMeta := FMeta.KeyProperty;
+  KeyValue := GetEntityValue(AEntity, KeyMeta);
+  if IsInvalidKeyValue(KeyValue) then
+    raise Exception.CreateFmt('Entity %s has null/empty key. Cannot update.',
+      [FMeta.EntityClass.ClassName]);
+
   SetClause := '';
   SetLength(ParamList, 0);
 
@@ -223,9 +285,13 @@ begin
     ParamList[High(ParamList)] := SQLParam(ParamName, GetEntityValue(AEntity, P));
   end;
 
+  if SetClause = '' then
+    raise Exception.CreateFmt('Entity %s has no writable non-key fields to update.',
+      [FMeta.EntityClass.ClassName]);
+
   ParamName := 'k_' + KeyMeta.ColumnName;
   SetLength(ParamList, Length(ParamList) + 1);
-  ParamList[High(ParamList)] := SQLParam(ParamName, GetEntityValue(AEntity, KeyMeta));
+  ParamList[High(ParamList)] := SQLParam(ParamName, KeyValue);
 
   AParams := ParamList;
   Result := Format('UPDATE %s SET %s WHERE %s = :%s',
@@ -239,6 +305,9 @@ var
 begin
   if not FMeta.HasKey then
     raise Exception.CreateFmt('Entity %s has no key. Cannot delete.',
+      [FMeta.EntityClass.ClassName]);
+  if IsInvalidKeyValue(AId) then
+    raise Exception.CreateFmt('Entity %s received null/empty key for delete.',
       [FMeta.EntityClass.ClassName]);
 
   KeyMeta := FMeta.KeyProperty;
@@ -257,26 +326,34 @@ var
   IdentityExec: ISQLIdentityExecutor;
   DriverInfo: ISQLDriverInfo;
   DriverID: string;
+  UseDefaultValues: Boolean;
+  ReturningColumn: string;
 begin
+  if AEntity = nil then
+    raise Exception.CreateFmt('Entity %s instance is nil. Cannot insert.',
+      [FMeta.EntityClass.ClassName]);
+
+  DriverID := '';
+  if Supports(FExecutor, ISQLDriverInfo, DriverInfo) then
+    DriverID := UpperCase(Trim(DriverInfo.GetDriverID));
+  UseDefaultValues := (DriverID = 'PG') or (DriverID = 'MSSQL') or (DriverID = 'SQLITE') or (DriverID = 'FB');
+
   if FMeta.HasKey and FMeta.KeyProperty.IsAutoGenerated then
   begin
     KeyMeta := FMeta.KeyProperty;
-    if Supports(FExecutor, ISQLDriverInfo, DriverInfo) then
+    if DriverID = 'PG' then
     begin
-      DriverID := UpperCase(Trim(DriverInfo.GetDriverID));
-      if DriverID = 'PG' then
-      begin
-        SQL := BuildInsertSQL(AEntity, Params, KeyMeta.ColumnName);
-        NewId := FExecutor.ExecuteScalar(SQL, Params);
-        if not VarIsNull(NewId) then
-          SetEntityValue(AEntity, KeyMeta, NewId);
-        Result := 1;
-        Exit;
-      end;
+      ReturningColumn := QuoteIdentifierForDriver(KeyMeta.ColumnName, DriverID);
+      SQL := BuildInsertSQL(AEntity, Params, ReturningColumn, UseDefaultValues);
+      NewId := FExecutor.ExecuteScalar(SQL, Params);
+      if not VarIsNull(NewId) then
+        SetEntityValue(AEntity, KeyMeta, NewId);
+      Result := Ord(not VarIsNull(NewId));
+      Exit;
     end;
   end;
 
-  SQL := BuildInsertSQL(AEntity, Params);
+  SQL := BuildInsertSQL(AEntity, Params, '', UseDefaultValues);
   Result := FExecutor.Execute(SQL, Params);
 
   if FMeta.HasKey then
@@ -297,6 +374,10 @@ var
   SQL: string;
   Params: TSQLParams;
 begin
+  if AEntity = nil then
+    raise Exception.CreateFmt('Entity %s instance is nil. Cannot update.',
+      [FMeta.EntityClass.ClassName]);
+
   SQL := BuildUpdateSQL(AEntity, Params);
   Result := FExecutor.Execute(SQL, Params);
 end;
@@ -306,6 +387,10 @@ function TRepository<T>.Delete(AEntity: T): Integer;
 var
   KeyMeta: TOrmPropertyMeta;
 begin
+  if AEntity = nil then
+    raise Exception.CreateFmt('Entity %s instance is nil. Cannot delete.',
+      [FMeta.EntityClass.ClassName]);
+
   if not FMeta.HasKey then
     raise Exception.CreateFmt('Entity %s has no key. Cannot delete.',
       [FMeta.EntityClass.ClassName]);
@@ -318,6 +403,10 @@ var
   SQL: string;
   Params: TSQLParams;
 begin
+  if IsInvalidKeyValue(AId) then
+    raise Exception.CreateFmt('Entity %s received null/empty key for delete.',
+      [FMeta.EntityClass.ClassName]);
+
   SQL := BuildDeleteSQL(AId, Params);
   Result := FExecutor.Execute(SQL, Params);
 end;
