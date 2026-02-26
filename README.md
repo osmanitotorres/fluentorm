@@ -1,40 +1,40 @@
                                                                               
-#  FluentORM                                                                  
-#  --------------------------------------------------------------------------  
-#  Minimalist and high-performance Micro ORM for Delphi                       
-#                                                                              
-#  Author: Osmanito Torres (Brazil)                                                    
+  ## FluentORM                                                                  
+  --------------------------------------------------------------------------  
+  Minimalist and high-performance Micro ORM for Delphi                       
                                                                               
-#  Description:                                                                
-#    FluentORM is a lightweight and efficient micro-ORM designed to provide   
-#    type-safe CRUD operations, SQL generation, and metadata-based mapping    
-#    for Delphi applications. It emphasizes simplicity, performance, and      
-#    explicit behavior over hidden abstractions.                               
+  Author: Osmanito Torres (Brazil)                                                    
                                                                               
-#    The framework includes:                                                   
-#      - Fluent SQL Builder                                                    
-#      - Generic Repository pattern                                            
-#      - Metadata caching via RTTI                                             
-#      - Transaction support                                                    
-#      - Multi-database dialect handling                                       
+  Description:                                                                
+    FluentORM is a lightweight and efficient micro-ORM designed to provide   
+    type-safe CRUD operations, SQL generation, and metadata-based mapping    
+    for Delphi applications. It emphasizes simplicity, performance, and      
+    explicit behavior over hidden abstractions.                               
                                                                               
-#  Disclaimer:                                                                 
-#    This software is provided "as is", without warranty of any kind,         
-#    express or implied, including but not limited to the warranties of        
-#    merchantability, fitness for a particular purpose and noninfringement.   
+    The framework includes:                                                   
+      - Fluent SQL Builder                                                    
+      - Generic Repository pattern                                            
+      - Metadata caching via RTTI                                             
+      - Transaction support                                                    
+      - Multi-database dialect handling                                       
                                                                               
-#    The author assumes no responsibility or liability for any damages         
-#    arising from the use of this component in any environment, including     
-#    production systems. Use at your own risk.                                 
+  Disclaimer:                                                                 
+    This software is provided "as is", without warranty of any kind,         
+    express or implied, including but not limited to the warranties of        
+    merchantability, fitness for a particular purpose and noninfringement.   
                                                                               
-#  Notes:                                                                      
-#    This component was designed with a minimalist philosophy and does not    
-#    aim to replicate the complexity of full-scale ORM frameworks. 
+    The author assumes no responsibility or liability for any damages         
+    arising from the use of this component in any environment, including     
+    production systems. Use at your own risk.                                 
+                                                                             
+  Notes:                                                                      
+    This component was designed with a minimalist philosophy and does not    
+    aim to replicate the complexity of full-scale ORM frameworks. 
             
                                                                               
-# LANGUAGE BRAZILIAN PORTUGUESE
+ LANGUAGE BRAZILIAN PORTUGUESE
 
-# FluentORM (Delphi/Pascal)
+ ## FluentORM (Delphi/Pascal)
 
 FluentORM e um builder SQL fluente para Delphi que permite montar consultas de forma encadeada, legivel e com menos concatenacao manual de strings.
 
