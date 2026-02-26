@@ -428,7 +428,7 @@ begin
 end;
 ```
 
-## Exemplo 6: StrictMode e observabilidade  (FASE 1)
+## Exemplo 6: StrictMode e observabilidade  (GRUPO 1)
 
 ```pascal
 procedure TForm1.SQLGenerated(Sender: TObject; const ASQL: string);
@@ -450,7 +450,7 @@ begin
 end;
 ```
 
-## Exemplo 7: SQL parametrizado (FASE 2)
+## Exemplo 7: SQL parametrizado (GRUPO 2)
 
 ```pascal
 var
@@ -481,7 +481,7 @@ begin
 end;
 ```
 
-## Exemplo 8: IN/NOT IN (FASE 3)
+## Exemplo 8: IN/NOT IN (GRUPO 3)
 
 ```pascal
 var
@@ -504,7 +504,7 @@ begin
 end;
 ```
 
-## Exemplo 9: Between sem Raw no StrictMode (FASE 3)
+## Exemplo 9: Between sem Raw no StrictMode (GRUPO 3)
 
 ```pascal
 var
@@ -526,7 +526,7 @@ begin
 end;
 ```
 
-## Exemplo 10: QuoteIdentifiers (FASE 4)
+## Exemplo 10: QuoteIdentifiers (GRUPO 4)
 
 ```pascal
 var
@@ -547,7 +547,7 @@ begin
 end;
 ```
 
-## Exemplo 11: QuoteIdentifiers em SELECT e alias (FASE 5)
+## Exemplo 11: QuoteIdentifiers em SELECT e alias (GRUPO 5)
 
 ```pascal
 var
@@ -566,7 +566,7 @@ begin
 end;
 ```
 
-## Exemplo 12: FromSQL com alias quoted (FASE 5)
+## Exemplo 12: FromSQL com alias quoted (GRUPO 5)
 
 ```pascal
 var
@@ -588,7 +588,7 @@ begin
 end;
 ```
 
-## Exemplo 13: HAVING com AND/OR (FASE 6)
+## Exemplo 13: HAVING com AND/OR (GRUPO 6)
 
 ```pascal
 var
@@ -612,7 +612,7 @@ begin
 end;
 ```
 
-## Exemplo 14: HAVING Raw com OR (FASE 6)
+## Exemplo 14: HAVING Raw com OR (GRUPO 6)
 
 ```pascal
 var
@@ -630,7 +630,7 @@ begin
 end;
 ```
 
-## Exemplo 15: Grupo logico em WHERE (FASE 7)
+## Exemplo 15: Grupo logico em WHERE (GRUPO 7)
 
 ```pascal
 var
@@ -654,7 +654,7 @@ begin
 end;
 ```
 
-## Exemplo 16: Grupo logico em HAVING (FASE 7)
+## Exemplo 16: Grupo logico em HAVING (GRUPO 7)
 
 ```pascal
 var
@@ -676,7 +676,7 @@ begin
 end;
 ```
 
-## Exemplo completo: precedencia de AND/OR no WHERE
+## Exemplo completo: precedencia de AND/OR no WHERE 
 
 Quando misturamos `AND` e `OR`, a precedencia SQL pode gerar resultado diferente do esperado.
 Para evitar ambiguidades, use grupos explicitos com `BeginWhereGroup/EndWhereGroup`.
@@ -745,7 +745,7 @@ Boas praticas:
 - evite depender apenas da precedencia padrao do SQL;
 - prefira `ToFormattedSQL` para validar visualmente a expressao final.
 
-## Exemplo 17: EXISTS/NOT EXISTS (FASE 8)
+## Exemplo 17: EXISTS/NOT EXISTS (GRUPO 8)
 
 ```pascal
 var
@@ -767,7 +767,7 @@ begin
 end;
 ```
 
-## Exemplo 18: EXISTS combinado com grupos logicos (FASE 8)
+## Exemplo 18: EXISTS combinado com grupos logicos (GRUPO 8)
 
 ```pascal
 var
@@ -787,7 +787,7 @@ begin
 end;
 ```
 
-## Exemplo 19: HAVING EXISTS/NOT EXISTS (FASE 9)
+## Exemplo 19: HAVING EXISTS/NOT EXISTS (GRUPO 9)
 
 ```pascal
 var
@@ -808,7 +808,7 @@ begin
 end;
 ```
 
-## Exemplo 20: HAVING EXISTS com grupos logicos (FASE 9)
+## Exemplo 20: HAVING EXISTS com grupos logicos (GRUPO 9)
 
 ```pascal
 var
@@ -829,7 +829,7 @@ begin
 end;
 ```
 
-## Exemplo 21: UNION e UNION ALL com SQL literal (FASE 10)
+## Exemplo 21: UNION e UNION ALL com SQL literal (GRUPO 10)
 
 ```pascal
 var
@@ -847,7 +847,7 @@ begin
 end;
 ```
 
-## Exemplo 22: UNION com outro builder e parametros (FASE 10)
+## Exemplo 22: UNION com outro builder e parametros (GRUPO 10)
 
 ```pascal
 var
@@ -886,7 +886,7 @@ begin
 end;
 ```
 
-## Exemplo 23: INTERSECT (FASE 11)
+## Exemplo 23: INTERSECT (GRUPO 11)
 
 ```pascal
 var
@@ -902,7 +902,7 @@ begin
 end;
 ```
 
-## Exemplo 24: EXCEPT com outro builder (FASE 11)
+## Exemplo 24: EXCEPT com outro builder (GRUPO 11)
 
 ```pascal
 var
@@ -937,7 +937,7 @@ begin
 end;
 ```
 
-## Exemplo 25: WITH CTE (FASE 12)
+## Exemplo 25: WITH CTE (GRUPO 12)
 
 ```pascal
 var
@@ -955,7 +955,7 @@ begin
 end;
 ```
 
-## Exemplo 26: WITH CTE com outro builder e parametros (FASE 12)
+## Exemplo 26: WITH CTE com outro builder e parametros (GRUPO 12)
 
 ```pascal
 var
@@ -989,7 +989,7 @@ begin
 end;
 ```
 
-## Exemplo 27: WITH RECURSIVE (FASE 12)
+## Exemplo 27: WITH RECURSIVE (GRUPO 12)
 
 ```pascal
 var
@@ -1028,14 +1028,14 @@ end;
 - `WhereIn` e `WhereNotIn` agora usam estrutura interna (sem `Raw`) e funcionam em `StrictMode`.
 - Com `QuoteIdentifiers = True`, apenas identificadores simples (ex.: `campo`, `tabela.campo`) sao quoted automaticamente.
 - Expressoes SQL avancadas (com espacos, funcoes, aliases, operadores) nao sao alteradas para evitar quebrar consultas customizadas.
-- A partir da FASE 5, `Fields/Field` e aliases simples tambem passam por quoting quando `QuoteIdentifiers=True`.
-- A partir da FASE 6, `HAVING` permite combinacoes com `AND/OR` sem precisar concatenar SQL manualmente.
-- A partir da FASE 7, `Begin...Group/End...Group` permitem parenteses em `WHERE/HAVING` sem usar metodos raw.
-- A partir da FASE 8, `WhereExists/WhereNotExists` e variantes `And/Or` evitam SQL raw manual para subconsultas comuns.
-- A partir da FASE 9, o mesmo padrao `Exists/NotExists` tambem esta disponivel no `HAVING`.
-- A partir da FASE 10, `Union/UnionAll` permitem compor consultas maiores sem sair da API fluente.
-- A partir da FASE 11, `Intersect/Except` cobrem os operadores de conjunto mais usados em SQL relacional.
-- A partir da FASE 12, `WithCTE/WithRecursiveCTE` permitem estruturar consultas complexas mantendo composicao fluente.
+- A partir do GRUPO 5, `Fields/Field` e aliases simples tambem passam por quoting quando `QuoteIdentifiers=True`.
+- A partir do GRUPO 6, `HAVING` permite combinacoes com `AND/OR` sem precisar concatenar SQL manualmente.
+- A partir do GRUPO 7, `Begin...Group/End...Group` permitem parenteses em `WHERE/HAVING` sem usar metodos raw.
+- A partir do GRUPO 8, `WhereExists/WhereNotExists` e variantes `And/Or` evitam SQL raw manual para subconsultas comuns.
+- A partir do GRUPO 9, o mesmo padrao `Exists/NotExists` tambem esta disponivel no `HAVING`.
+- A partir do GRUPO 10, `Union/UnionAll` permitem compor consultas maiores sem sair da API fluente.
+- A partir do GRUPO 11, `Intersect/Except` cobrem os operadores de conjunto mais usados em SQL relacional.
+- A partir do GRUPO 12, `WithCTE/WithRecursiveCTE` permitem estruturar consultas complexas mantendo composicao fluente.
 - Dica de uso: inicie com `Select` e depois aplique `WithCTE/WithRecursiveCTE` na mesma cadeia.
 - Para `Insert` com chave auto-gerada, o executor FireDAC usa SQL especifica por driver (`LAST_INSERT_ID`, `SCOPE_IDENTITY`, etc.).
 - Seguranca adicional: `WhereNotBetween` nao usa mais caminho raw interno (suporta parametros nomeados).
@@ -1064,11 +1064,8 @@ Regras de geracao:
 - `dbMSSQL`: `OFFSET ... ROWS FETCH NEXT ... ROWS ONLY`
 - No MSSQL, quando ha paginacao sem ordenacao explicita, o builder injeta `ORDER BY (SELECT NULL)` para manter SQL valido.
 
-## Licenca
 
-Defina aqui a licenca do projeto (por exemplo: MIT).
-
-## ORM minimo (DTO + RTTI)
+# ORM minimo (DTO + RTTI)
 
 ### 1. Defina seu DTO
 
