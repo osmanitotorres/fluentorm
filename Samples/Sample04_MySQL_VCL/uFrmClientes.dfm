@@ -286,21 +286,21 @@ object frmClientes: TfrmClientes
       object lblTelefone: TLabel
         Left = 200
         Top = 160
-        Width = 44
+        Width = 45
         Height = 15
         Caption = 'Telefone'
       end
       object lblNascimento: TLabel
         Left = 16
         Top = 208
-        Width = 192
+        Width = 227
         Height = 15
         Caption = 'Nascimento (desmarque = nao informado)'
       end
       object lblLimite: TLabel
         Left = 272
         Top = 208
-        Width = 92
+        Width = 89
         Height = 15
         Caption = 'Limite de credito'
       end

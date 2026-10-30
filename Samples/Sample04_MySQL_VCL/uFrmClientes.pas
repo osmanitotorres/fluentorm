@@ -218,44 +218,76 @@ end;
 { Conexao }
 
 procedure TfrmClientes.ConfigureVendorLib;
+// Localiza e PRE-CARREGA a libmysql.dll. Depois que a DLL esta carregada no
+// processo, o FireDAC a reutiliza (LoadLibrary pelo nome devolve o modulo ja
+// carregado), entao nao dependemos de PATH nem de copiar arquivos.
 var
-  ExeLib, Root, Lib: string;
+  Candidates: TStringList;
+  ExeDir, Root, Lib, LibDir, BinDir: string;
   Dirs: TArray<string>;
   I: Integer;
+  H: HMODULE;
 begin
-  // 1) libmysql.dll ao lado do executavel: o FireDAC encontra sozinho.
-  ExeLib := TPath.Combine(ExtractFilePath(ParamStr(0)), 'libmysql.dll');
-  if FileExists(ExeLib) then
-  begin
-    Log('libmysql.dll: ' + ExeLib);
-    Exit;
-  end;
-
-  // 2) Instalacao do MySQL Server (C:\Program Files\MySQL\MySQL Server x.y).
-  //    A libmysql.dll fica em "lib" e as dependencias (OpenSSL) em "bin".
-  Root := TPath.Combine(GetEnvironmentVariable('ProgramFiles'), 'MySQL');
-  if TDirectory.Exists(Root) then
-  begin
-    Dirs := TDirectory.GetDirectories(Root, 'MySQL Server*');
-    for I := High(Dirs) downto Low(Dirs) do // versao mais nova primeiro
+  Candidates := TStringList.Create;
+  try
+    ExeDir := ExtractFilePath(ParamStr(0));
+    // 1) Pasta do executavel e subpasta "lib".
+    Candidates.Add(TPath.Combine(ExeDir, 'libmysql.dll'));
+    Candidates.Add(TPath.Combine(ExeDir, 'lib\libmysql.dll'));
+    // 2) MySQL Server instalado (versao mais nova primeiro).
+    // ProgramW6432 aponta sempre para "C:\Program Files". ProgramFiles pode vir
+    // como "C:\Program Files (x86)" quando o exe e iniciado pela IDE (32 bits).
+    Root := GetEnvironmentVariable('ProgramW6432');
+    if Root = '' then
+      Root := GetEnvironmentVariable('ProgramFiles');
+    Root := TPath.Combine(Root, 'MySQL');
+    if TDirectory.Exists(Root) then
     begin
-      Lib := TPath.Combine(Dirs[I], 'lib\libmysql.dll');
-      if FileExists(Lib) then
+      Dirs := TDirectory.GetDirectories(Root);
+      for I := High(Dirs) downto Low(Dirs) do
       begin
-        SetDllDirectory(PChar(TPath.Combine(Dirs[I], 'bin')));
-        FDriverLink.VendorLib := Lib;
-        Log('libmysql.dll: ' + Lib);
-        Exit;
+        Candidates.Add(TPath.Combine(Dirs[I], 'lib\libmysql.dll'));
+        Candidates.Add(TPath.Combine(Dirs[I], 'bin\libmysql.dll'));
       end;
     end;
+
+    for I := 0 to Candidates.Count - 1 do
+    begin
+      Lib := Candidates[I];
+      if not FileExists(Lib) then
+        Continue;
+
+      // Dependencias (libssl-3-x64.dll, libcrypto-3-x64.dll...) ficam na pasta
+      // "bin" da instalacao do MySQL; quando a DLL esta em "lib", aponta para "bin".
+      LibDir := ExtractFileDir(Lib);
+      BinDir := TPath.Combine(ExtractFileDir(LibDir), 'bin');
+      if SameText(ExtractFileName(LibDir), 'lib') and TDirectory.Exists(BinDir) then
+        SetDllDirectory(PChar(BinDir))
+      else
+        SetDllDirectory(PChar(LibDir));
+
+      H := LoadLibraryEx(PChar(Lib), 0, LOAD_WITH_ALTERED_SEARCH_PATH);
+      if H = 0 then
+      begin
+        Log('Falha ao carregar ' + Lib + ': ' + SysErrorMessage(GetLastError));
+        Continue;
+      end;
+
+      FDriverLink.VendorLib := Lib;
+      Log('libmysql.dll carregada: ' + Lib);
+      Exit;
+    end;
+  finally
+    Candidates.Free;
   end;
 
-  Log('libmysql.dll nao encontrada. Copie a libmysql.dll (mesma arquitetura do ' +
-    'executavel) para a pasta do .exe.');
+  Log('libmysql.dll nao encontrada/carregada. Copie a libmysql.dll (mesma arquitetura ' +
+    'do executavel) e as DLLs libssl*/libcrypto* da pasta bin do MySQL para a pasta do .exe.');
   {$IFDEF WIN32}
   Log('Atencao: este executavel e 32 bits; o MySQL Server instala a libmysql.dll ' +
     '64 bits. Compile o projeto em Win64.');
   {$ENDIF}
+  pgcPrincipal.ActivePage := tsSQL;
 end;
 
 procedure TfrmClientes.ApplyConnectionParams(AWithDatabase: Boolean);

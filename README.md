@@ -83,6 +83,7 @@ O foco da biblioteca e:
 - `uFluentORM.Executor.pas`: contrato de execucao SQL desacoplado (`ISQLExecutor`, `ISQLDialectInfo`, `ISQLIdentityExecutor`).
 - `uFluentORM.Executor.FireDAC.pas`: executor pronto para FireDAC (`TFireDACSQLExecutor`).
 - `uFluentORM.Executor.ADO.pas`: executor ADO (`TADOSQLExecutor`), para SQL Server em edicoes do Delphi sem o driver FireDAC MSSQL.
+- `uFluentORM.Executor.UniDAC.pas`: executor Devart UniDAC (`TUniDACSQLExecutor`). Requer o UniDAC instalado; por isso nao entra no `build.bat`.
 - `uFluentORM.ConnectionPool.FireDAC.pas`: factory de conexoes com pool do FireDAC.
 - `uFluentORM.Repository.pas`: CRUD minimo com `TRepository<T>`.
 - `Samples/`: exemplos de uso (VCL em `Sample01`/`Sample02`; console multi-banco em `Sample03_MultiBanco`).
@@ -1157,6 +1158,40 @@ Cada parametro e enviado com o `TFieldType` correspondente ao tipo da propriedad
 | `Variant` | inferido (NULL vira `ftWideString`) | qualquer | qualquer | qualquer |
 
 O tipo e decidido pelo tipo *declarado* da propriedade (nao por `TValue.IsType`, que aceita tipos conversiveis e confundiria `Double` com `TDateTime`).
+
+### Usando UniDAC
+
+O ORM nao depende do FireDAC: tudo passa pela interface `ISQLExecutor`. Com o UniDAC instalado, inclua `uFluentORM.Executor.UniDAC.pas` no projeto e o provider de cada banco usado:
+
+```pascal
+uses
+  Uni, MySQLUniProvider, SQLServerUniProvider, PostgreSQLUniProvider, // providers usados
+  uFluentORM.Executor, uFluentORM.Executor.UniDAC, uFluentORM.Repository;
+
+var
+  Exec: ISQLExecutor;
+  Repo: TRepository<TClienteDTO>;
+begin
+  // Conexao propria (MySQL em modo Direct: nao precisa de libmysql.dll)
+  Exec := TUniDACSQLExecutor.CreateConnected('MySQL', 'localhost', 3306,
+    'fluentorm_demo', 'usuario', 'senha');
+
+  // ...ou uma TUniConnection que ja existe no seu data module:
+  // Exec := TUniDACSQLExecutor.Create(UniConnection1);
+
+  Repo := TRepository<TClienteDTO>.Create(Exec);
+  try
+    Cliente := Repo.FindById(1);
+    // Insert/Update/Delete/Count/FindAll e TSQLTransaction funcionam igual.
+  finally
+    Repo.Free;
+  end;
+end;
+```
+
+O dialeto e deduzido de `TUniConnection.ProviderName` (`MySQL`, `SQL Server`, `PostgreSQL`, `InterBase`, `SQLite`); use `TUniDACSQLExecutor.Create(Conn, dbMSSQL)` para informa-lo explicitamente. `OpenQuery`/`OpenDataSet` leem consultas do builder (`Exec.OpenQuery(Builder.ToSQL, Builder.ToSQLParams)`).
+
+> Esta unit foi escrita sem o UniDAC instalado e ainda nao foi compilada. Ao instalar o UniDAC, compile um projeto que a use e valide principalmente o insert no SQL Server (batch com `DECLARE @fluent_ids`).
 
 ### Leitura de entidades
 

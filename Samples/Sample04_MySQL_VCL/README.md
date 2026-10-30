@@ -21,10 +21,12 @@ Aplicacao com formulario que usa as principais partes do FluentORM contra um MyS
 
 ## libmysql.dll
 
-O programa procura, nesta ordem:
+O programa procura e pre-carrega a DLL, nesta ordem:
 
-1. `libmysql.dll` na pasta do executavel;
-2. `C:\Program Files\MySQL\MySQL Server x.y\lib\libmysql.dll` (a pasta `bin` da mesma instalacao e adicionada a busca de DLLs, por causa das dependencias OpenSSL).
+1. `libmysql.dll` na pasta do executavel ou na subpasta `lib`;
+2. `C:\Program Files\MySQL\<versao>\lib\libmysql.dll` (a pasta `bin` da mesma instalacao e adicionada a busca de DLLs, por causa das dependencias `libssl-3-x64.dll`/`libcrypto-3-x64.dll`).
+
+O caminho usado (ou o motivo da falha) aparece na aba **Log de SQL** ao abrir o programa.
 
 Se aparecer "Cannot load vendor library", copie a `libmysql.dll` e as DLLs `libssl*`/`libcrypto*` da pasta `bin` do MySQL Server para a pasta do executavel.
 
