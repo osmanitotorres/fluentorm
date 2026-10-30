@@ -1189,6 +1189,8 @@ begin
 end;
 ```
 
+Passo a passo completo e exemplo executavel em `Samples/Sample05_UniDAC/`.
+
 O dialeto e deduzido de `TUniConnection.ProviderName` (`MySQL`, `SQL Server`, `PostgreSQL`, `InterBase`, `SQLite`); use `TUniDACSQLExecutor.Create(Conn, dbMSSQL)` para informa-lo explicitamente. `OpenQuery`/`OpenDataSet` leem consultas do builder (`Exec.OpenQuery(Builder.ToSQL, Builder.ToSQLParams)`).
 
 > Esta unit foi escrita sem o UniDAC instalado e ainda nao foi compilada. Ao instalar o UniDAC, compile um projeto que a use e valide principalmente o insert no SQL Server (batch com `DECLARE @fluent_ids`).
@@ -1483,6 +1485,7 @@ Detalhes completos em:
 | `Samples/Sample01.dpr` | VCL | Builder (varios dialetos) e `TRepository<T>` com MySQL, transacao e pool. |
 | `Samples/Sample02/` | VCL | Carrega a tabela `usuario` em grid a partir do SQL do builder (MySQL, SQL Server ou PostgreSQL). Scripts: `script-MySQL.sql`, `script-MSSQL.sql`, `script-PostgreSQL.sql`. |
 | `Samples/Sample04_MySQL_VCL/` | VCL | Cadastro de clientes completo em MySQL: cria banco/tabela, lista com filtro e paginacao (builder + `ToSQLCount`), `FindById`/`Insert`/`Update`/`DeleteById`, geracao de dados em transacao e log de todo SQL executado. |
+| `Samples/Sample05_UniDAC/` | Console | Tutorial do FluentORM com **UniDAC** (MySQL, SQL Server, PostgreSQL): executor criando a conexao ou usando uma `TUniConnection` existente, CRUD em transacao, tipos, `FindById`/`FindAll` e builder com `TUniQuery`. Requer UniDAC; fora do `build.bat`. |
 | `Samples/Sample03_MultiBanco/` | Console | O mesmo codigo em MySQL, PostgreSQL (FireDAC) e SQL Server (ADO): CRUD em transacao, rollback automatico, mapeamento de tipos (`Int64`, `TGUID`, `Currency`, `Double`, `TDate`, `TBytes`, `Variant`), builder com paginacao e `ToSQLCount` lido com `OpenQuery`. Scripts em `scripts/` (o do SQL Server cria trigger). |
 
 ```bat
