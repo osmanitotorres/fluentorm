@@ -127,6 +127,13 @@
             <Form>frmMain</Form>
         </DCCReference>
         <DCCReference Include="..\..\uFluentORM.pas"/>
+        <DCCReference Include="..\..\uFluentORM.Types.pas"/>
+        <DCCReference Include="..\..\uFluentORM.Attributes.pas"/>
+        <DCCReference Include="..\..\uFluentORM.Metadata.pas"/>
+        <DCCReference Include="..\..\uFluentORM.Executor.pas"/>
+        <DCCReference Include="..\..\uFluentORM.Executor.FireDAC.pas"/>
+        <DCCReference Include="..\..\uFluentORM.Repository.pas"/>
+        <DCCReference Include="..\..\uFluentORM.ConnectionPool.FireDAC.pas"/>
         <BuildConfiguration Include="Debug">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

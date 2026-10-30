@@ -1,7 +1,7 @@
 object frmMain: TfrmMain
   Left = 0
   Top = 0
-  Caption = 'FluentORM - Sample02 (MySQL / SQL Server)'
+  Caption = 'FluentORM - Sample02 (MySQL / SQL Server / PostgreSQL)'
   ClientHeight = 560
   ClientWidth = 940
   Color = clBtnFace

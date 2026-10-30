@@ -41,6 +41,7 @@ interface
 uses
   System.SysUtils,
   System.Variants,
+  Data.DB,
   uFluentORM.Types;
 
 type
@@ -68,13 +69,35 @@ type
     function GetLastInsertedId: Variant;
   end;
 
+  /// <summary>
+  /// Optional capability: opens a SELECT and returns the dataset (the caller
+  /// owns and frees it). Required by TRepository<T>.FindById/FindAll.
+  /// </summary>
+  ISQLQueryExecutor = interface(ISQLExecutor)
+    ['{3E7C1F52-8B44-4D7A-A6B1-2F0D9C5E7A13}']
+    function OpenDataSet(const ASQL: string; const AParams: TSQLParams): TDataSet;
+  end;
+
+  /// <summary>
+  /// Optional capability: informs the SQL dialect of the connection so the
+  /// repository can quote identifiers and choose the identity retrieval
+  /// strategy (RETURNING / OUTPUT INSERTED / LAST_INSERT_ID) correctly.
+  /// Executors that do not implement it fall back to ISQLDriverInfo.
+  /// </summary>
+  ISQLDialectInfo = interface
+    ['{C2A5E0A1-4D0E-4A3B-9D5E-6F1B7C8D9E20}']
+    function GetDatabaseType: TSQLDatabaseType;
+  end;
+
   TSQLTransaction = class
   public
     class function HasTransactionSupport(const AExecutor: ISQLExecutor): Boolean; static;
     class procedure ExecuteInTransaction(const AExecutor: ISQLExecutor; const AProc: TProc); static;
   end;
 
-function SQLParam(const AName: string; const AValue: Variant): TSQLParam;
+function SQLParam(const AName: string; const AValue: Variant): TSQLParam; overload;
+function SQLParam(const AName: string; const AValue: Variant;
+  ADataType: TFieldType): TSQLParam; overload;
 
 implementation
 
@@ -121,6 +144,15 @@ function SQLParam(const AName: string; const AValue: Variant): TSQLParam;
 begin
   Result.Name := AName;
   Result.Value := AValue;
+  Result.DataType := ftUnknown;
+end;
+
+function SQLParam(const AName: string; const AValue: Variant;
+  ADataType: TFieldType): TSQLParam;
+begin
+  Result.Name := AName;
+  Result.Value := AValue;
+  Result.DataType := ADataType;
 end;
 
 end.

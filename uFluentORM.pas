@@ -38,7 +38,18 @@ unit uFluentORM;
 interface
 uses
   System.SysUtils, System.Classes, System.Generics.Collections, System.Variants,
-  System.StrUtils;
+  System.StrUtils, System.Math, Data.DB, uFluentORM.Types;
+
+const
+  // Enum literals are not imported by a type alias, so the dialect values are
+  // re-exported here to keep code that only uses uFluentORM compiling unchanged.
+  dbGeneric = uFluentORM.Types.dbGeneric;
+  dbMySQL = uFluentORM.Types.dbMySQL;
+  dbPostgreSQL = uFluentORM.Types.dbPostgreSQL;
+  dbFirebird = uFluentORM.Types.dbFirebird;
+  dbSQLite = uFluentORM.Types.dbSQLite;
+  dbMSSQL = uFluentORM.Types.dbMSSQL;
+
 type
   TSQLGeneratedEvent = procedure(Sender: TObject; const ASQL: string) of object;
   TSQLOperator = (opEqual, opNotEqual, opGreater, opLess, 
@@ -47,7 +58,9 @@ type
   
   TSQLOrderDirection = (odAsc, odDesc);
   TSQLJoinType = (jtInner, jtLeft, jtRight, jtFull);
-  TSQLDatabaseType = (dbGeneric, dbMySQL, dbPostgreSQL, dbFirebird, dbSQLite, dbMSSQL);
+  // TSQLDatabaseType is declared in uFluentORM.Types and kept here for
+  // backward compatibility (the enum values dbGeneric/dbMySQL/... are the same).
+  TSQLDatabaseType = uFluentORM.Types.TSQLDatabaseType;
   
   TWhereCondition = record
     Field: string;
@@ -114,10 +127,14 @@ type
     FStrictMode: Boolean;
     FUseNamedParams: Boolean;
     FQuoteIdentifiers: Boolean;
+    FParamPrefix: string;
     FOnSQLGenerated: TSQLGeneratedEvent;
     
     function GetOperatorText(AOperator: TSQLOperator): string;
     function FormatValue(const AValue: Variant): string;
+    function QuoteStringLiteral(const AValue: string): string;
+    function FormatDateLiteral(const AValue: TDateTime): string;
+    function BuildSQL(ACountOnly: Boolean): string;
     function CreateParamName(const AField: string): string;
     function GetParamPrefix: string;
     function GetParamPlaceholder(const AParamName: string): string;
@@ -144,7 +161,6 @@ type
     function BuildGroupByClause: string;
     function BuildHavingClause: string;
     function BuildLimitOffsetClause: string;
-    function CleanOperator(const AValue: string; const AOperator: string): string;
     procedure NormalizeFieldAndOperator(var AField: string; var AOperator: TSQLOperator);
     
   public
@@ -279,6 +295,9 @@ type
     // Parâmetros
     function GetParameters: TArray<string>;
     function GetParamValue(const AParamName: string): Variant;
+    // Parametros da ultima geracao (ToSQL/ToSQLCount) no formato do executor:
+    //   SQLText := B.ToSQL;  Exec.ExecuteScalar(SQLText, B.ToSQLParams);
+    function ToSQLParams: TSQLParams;
     
     // Utilitários
     procedure Clear;
@@ -286,11 +305,97 @@ type
     property StrictMode: Boolean read FStrictMode write FStrictMode;
     property UseNamedParams: Boolean read FUseNamedParams write FUseNamedParams;
     property QuoteIdentifiers: Boolean read FQuoteIdentifiers write FQuoteIdentifiers;
+    // Prefixo dos placeholders gerados. Padrao ':' (FireDAC, Zeos, UniDAC, ADO e
+    // dbExpress reconhecem ':nome' em todos os bancos, inclusive SQL Server).
+    property ParamPrefix: string read FParamPrefix write FParamPrefix;
     property OnSQLGenerated: TSQLGeneratedEvent read FOnSQLGenerated write FOnSQLGenerated;
   end;
 implementation
-uses
-  System.Math;
+function IsSQLIdentChar(const C: Char): Boolean;
+begin
+  Result := CharInSet(C, ['A'..'Z', 'a'..'z', '0'..'9', '_']);
+end;
+
+// Substitui um placeholder de parametro respeitando limites de token,
+// evitando que ':cidade' altere ':cidade1' ou um cast PostgreSQL '::tipo'.
+function ReplaceParamToken(const ASQL, AOld, ANew: string): string;
+var
+  P, StartPos, L: Integer;
+  NextCh, PrevCh: Char;
+begin
+  if AOld = '' then
+    Exit(ASQL);
+  Result := '';
+  StartPos := 1;
+  L := Length(AOld);
+  P := PosEx(AOld, ASQL, StartPos);
+  while P > 0 do
+  begin
+    if P + L <= Length(ASQL) then
+      NextCh := ASQL[P + L]
+    else
+      NextCh := #0;
+    if P > 1 then
+      PrevCh := ASQL[P - 1]
+    else
+      PrevCh := #0;
+    if IsSQLIdentChar(NextCh) or (PrevCh = ':') or IsSQLIdentChar(PrevCh) then
+      Result := Result + Copy(ASQL, StartPos, P - StartPos + L)
+    else
+      Result := Result + Copy(ASQL, StartPos, P - StartPos) + ANew;
+    StartPos := P + L;
+    P := PosEx(AOld, ASQL, StartPos);
+  end;
+  Result := Result + Copy(ASQL, StartPos, MaxInt);
+end;
+
+// Splits a comma separated SQL list honouring parentheses and quotes, so
+// expressions like CAST(x AS DECIMAL(10,2)) are not broken in the middle.
+function SplitSQLList(const AValue: string; ASeparator: Char): TArray<string>;
+var
+  I, StartPos, Depth: Integer;
+  Quote: Char;
+  Parts: TList<string>;
+begin
+  Parts := TList<string>.Create;
+  try
+    Quote := #0;
+    Depth := 0;
+    StartPos := 1;
+    for I := 1 to Length(AValue) do
+    begin
+      if Quote <> #0 then
+      begin
+        if AValue[I] = Quote then
+          Quote := #0;
+      end
+      else
+      begin
+        case AValue[I] of
+          '''': Quote := '''';
+          '"': Quote := '"';
+          '`': Quote := '`';
+          '[': Quote := ']';
+          '(': Inc(Depth);
+          ')':
+            if Depth > 0 then
+              Dec(Depth);
+        end;
+
+        if (AValue[I] = ASeparator) and (Depth = 0) and (Quote = #0) then
+        begin
+          Parts.Add(Trim(Copy(AValue, StartPos, I - StartPos)));
+          StartPos := I + 1;
+        end;
+      end;
+    end;
+    Parts.Add(Trim(Copy(AValue, StartPos, MaxInt)));
+    Result := Parts.ToArray;
+  finally
+    Parts.Free;
+  end;
+end;
+
 { TSQLFormatter }
 class function TSQLFormatter.Format(const ASQL: string; AIndentSize: Integer): string;
 type
@@ -375,10 +480,13 @@ begin
       end
       else
       begin
-        if (Ch = '''') or (Ch = '"') then
+        if (Ch = '''') or (Ch = '"') or (Ch = '`') or (Ch = '[') then
         begin
           InQuote := True;
-          QuoteChar := Ch;
+          if Ch = '[' then
+            QuoteChar := ']'
+          else
+            QuoteChar := Ch;
           Token := Token + Ch;
         end
         else if Ch <= ' ' then
@@ -481,6 +589,13 @@ begin
         Inc(I);
         Continue;
       end;
+      if (UpperToken(I) = 'UNION') or (UpperToken(I) = 'INTERSECT') or
+         (UpperToken(I) = 'EXCEPT') then
+      begin
+        StartClause(UpperToken(I), ckOther);
+        Inc(I);
+        Continue;
+      end;
       if (ClauseKind in [ckWhere, ckHaving]) and
          ((UpperToken(I) = 'AND') or (UpperToken(I) = 'OR')) then
       begin
@@ -523,6 +638,7 @@ begin
   FStrictMode := True;
   FUseNamedParams := True;
   FQuoteIdentifiers := False;
+  FParamPrefix := ':';
   Reset;
 end;
 
@@ -611,7 +727,7 @@ end;
 function TSQLBuilder.StripEndingSemicolon(const ASQL: string): string;
 begin
   Result := Trim(ASQL);
-  while (Result <> '') and (Result[Length(Result)] in [';', ' ']) do
+  while (Result <> '') and CharInSet(Result[Length(Result)], [';', ' ']) do
     Delete(Result, Length(Result), 1);
 end;
 function TSQLBuilder.BuildUnionClause(const ASQL, AOperatorText: string;
@@ -747,10 +863,11 @@ var
   FieldArray: TArray<string>;
   FieldName: string;
 begin
-  // Divide a string por vírgulas e processa cada campo individualmente
-  FieldArray := AFields.Split([',']);
+  // Divide apenas nas virgulas de nivel zero (preserva CAST(x AS DECIMAL(10,2)))
+  FieldArray := SplitSQLList(AFields, ',');
   for FieldName in FieldArray do
-    FSelectFields.Add(NormalizeFieldExpression(FieldName));
+    if FieldName <> '' then
+      FSelectFields.Add(NormalizeFieldExpression(FieldName));
   Result := Self;
 end;
 
@@ -841,7 +958,7 @@ begin
   for I := 1 to Length(AField) do
   begin
     C := AField[I];
-    if (C in ['A'..'Z']) or (C in ['a'..'z']) or (C in ['0'..'9']) or (C = '_') then
+    if CharInSet(C, ['A'..'Z', 'a'..'z', '0'..'9', '_']) then
       BaseName := BaseName + C
     else
       BaseName := BaseName + '_';
@@ -869,9 +986,11 @@ begin
 end;
 function TSQLBuilder.GetParamPrefix: string;
 begin
-  if FDatabaseType = dbMSSQL then
-    Result := '@'
-  else
+  // Antes o MSSQL usava '@', mas os componentes Delphi (FireDAC inclusive)
+  // so reconhecem ':nome' como parametro; '@nome' virava variavel T-SQL nao
+  // declarada ("Must declare the scalar variable").
+  Result := FParamPrefix;
+  if Result = '' then
     Result := ':';
 end;
 function TSQLBuilder.GetParamPlaceholder(const AParamName: string): string;
@@ -920,52 +1039,12 @@ begin
   AConditions.Add(Condition);
 end;
 function TSQLBuilder.IsSimpleIdentifier(const AValue: string): Boolean;
-var
-  I: Integer;
-  Part: string;
-  Parts: TArray<string>;
-  C: Char;
 begin
-  Result := False;
-  if Trim(AValue) = '' then
-    Exit;
-  Parts := AValue.Split(['.']);
-  if Length(Parts) = 0 then
-    Exit;
-  for Part in Parts do
-  begin
-    if Part = '' then
-      Exit;
-    C := Part[1];
-    if not ((C in ['A'..'Z']) or (C in ['a'..'z']) or (C = '_')) then
-      Exit;
-    for I := 2 to Length(Part) do
-    begin
-      C := Part[I];
-      if not ((C in ['A'..'Z']) or (C in ['a'..'z']) or (C in ['0'..'9']) or (C = '_')) then
-        Exit;
-    end;
-  end;
-  Result := True;
+  Result := TSQLDialect.IsSimpleIdentifier(AValue);
 end;
 function TSQLBuilder.QuoteIdentifier(const AValue: string): string;
-var
-  I: Integer;
-  Parts: TArray<string>;
 begin
-  if not IsSimpleIdentifier(AValue) then
-    Exit(AValue);
-  Parts := AValue.Split(['.']);
-  for I := Low(Parts) to High(Parts) do
-  begin
-    case FDatabaseType of
-      dbMSSQL:
-        Parts[I] := '[' + Parts[I] + ']';
-    else
-      Parts[I] := '"' + Parts[I] + '"';
-    end;
-  end;
-  Result := string.Join('.', Parts);
+  Result := TSQLDialect.QuoteIdentifier(AValue, FDatabaseType);
 end;
 function TSQLBuilder.NormalizeIdentifier(const AValue: string): string;
 begin
@@ -1085,41 +1164,80 @@ begin
     Exit;
   end;
 end;
+function TSQLBuilder.QuoteStringLiteral(const AValue: string): string;
+var
+  S: string;
+begin
+  S := StringReplace(AValue, '''', '''''', [rfReplaceAll]);
+  // MySQL (sem NO_BACKSLASH_ESCAPES) interpreta '\' como escape dentro de
+  // literais: sem duplicar a barra, um valor terminado em '\' quebra o SQL.
+  if FDatabaseType = dbMySQL then
+    S := StringReplace(S, '\', '\\', [rfReplaceAll]);
+  // SQL Server: prefixo N preserva caracteres Unicode (acentos, emojis etc.)
+  if FDatabaseType = dbMSSQL then
+    Result := 'N''' + S + ''''
+  else
+    Result := '''' + S + '''';
+end;
+
+function TSQLBuilder.FormatDateLiteral(const AValue: TDateTime): string;
+var
+  FS: TFormatSettings;
+  HasTime: Boolean;
+begin
+  FS := TFormatSettings.Create;
+  FS.DateSeparator := '-';
+  FS.TimeSeparator := ':';
+  FS.DecimalSeparator := '.';
+  HasTime := Frac(AValue) <> 0;
+  case FDatabaseType of
+    dbMSSQL:
+      // Formatos ISO independentes de SET LANGUAGE / SET DATEFORMAT.
+      // ('yyyy-mm-dd' e interpretado como yyyy-dd-mm em DATETIME com idioma PT/FR.)
+      if HasTime then
+        Result := '''' + FormatDateTime('yyyy-mm-dd"T"hh:nn:ss.zzz', AValue, FS) + ''''
+      else
+        Result := '''' + FormatDateTime('yyyymmdd', AValue, FS) + '''';
+  else
+    if HasTime then
+      Result := '''' + FormatDateTime('yyyy-mm-dd hh:nn:ss', AValue, FS) + ''''
+    else
+      Result := '''' + FormatDateTime('yyyy-mm-dd', AValue, FS) + '''';
+  end;
+end;
+
 function TSQLBuilder.FormatValue(const AValue: Variant): string;
 var
   InvariantFS: TFormatSettings;
 begin
   if VarIsNull(AValue) or VarIsEmpty(AValue) then
-    Result := 'NULL'
-  else
-    case VarType(AValue) of
-      varString, varUString:
-        Result := QuotedStr(String(AValue));
-      varDate:
-        Result := QuotedStr(FormatDateTime('yyyy-mm-dd', AValue));
-      varBoolean:
-        if FDatabaseType = dbPostgreSQL then
-          Result := IfThen(AValue, 'TRUE', 'FALSE')
-        else if FDatabaseType = dbMSSQL then
-          Result := IfThen(AValue, '1', '0')
-        else if FDatabaseType = dbSQLite then
-          Result := IfThen(AValue, '1', '0')
-        else if FDatabaseType = dbFirebird then
-          Result := IfThen(AValue, '1', '0')
-        else
-          Result := IfThen(AValue, '1', '0');
-      varInteger, varWord, varShortInt, varByte, varLongWord, varInt64:
-        Result := IntToStr(AValue);
-      varDouble, varSingle, varCurrency:
-        begin
-          InvariantFS := TFormatSettings.Create;
-          InvariantFS.DecimalSeparator := '.';
-          InvariantFS.ThousandSeparator := #0;
-          Result := FloatToStr(AValue, InvariantFS);
-        end;
-    else
+    Exit('NULL');
+
+  InvariantFS := TFormatSettings.Create;
+  InvariantFS.DecimalSeparator := '.';
+  InvariantFS.ThousandSeparator := #0;
+
+  case VarType(AValue) and varTypeMask of
+    varString, varUString, varOleStr:
+      Result := QuoteStringLiteral(VarToStr(AValue));
+    varDate:
+      Result := FormatDateLiteral(VarToDateTime(AValue));
+    varBoolean:
+      if FDatabaseType = dbPostgreSQL then
+        Result := IfThen(Boolean(AValue), 'TRUE', 'FALSE')
+      else
+        Result := IfThen(Boolean(AValue), '1', '0');
+    varSmallint, varInteger, varShortInt, varByte, varWord, varLongWord,
+    varInt64, varUInt64:
       Result := VarToStr(AValue);
-    end;
+    varSingle, varDouble, varCurrency:
+      Result := FloatToStr(Double(AValue), InvariantFS);
+  else
+    if VarIsNumeric(AValue) then
+      Result := FloatToStr(Double(AValue), InvariantFS)
+    else
+      Result := QuoteStringLiteral(VarToStr(AValue));
+  end;
 end;
 function TSQLBuilder.Where(const AField: string; AValue: Variant;
                            AOperator: TSQLOperator): TSQLBuilder;
@@ -1543,7 +1661,7 @@ var
   FieldName: string;
   Dir: TSQLOrderDirection;
 begin
-  Parts := AFields.Split([',']);
+  Parts := SplitSQLList(AFields, ',');
   for Part in Parts do
   begin
     Item := Trim(Part);
@@ -1591,13 +1709,15 @@ begin
 end;
 function TSQLBuilder.GroupBy(const AFields: string): TSQLBuilder;
 var
-  I: Integer;
+  Parts: TArray<string>;
+  Part: string;
 begin
-  FGroupByFields.Delimiter := ',';
-  FGroupByFields.DelimitedText := AFields;
-  if FQuoteIdentifiers then
-    for I := 0 to FGroupByFields.Count - 1 do
-      FGroupByFields[I] := NormalizeIdentifier(FGroupByFields[I]);
+  // Antes usava DelimitedText sem StrictDelimiter: quebrava em espacos
+  // (ex.: 'DATE(x), y DESC') e apagava os campos ja adicionados.
+  Parts := SplitSQLList(AFields, ',');
+  for Part in Parts do
+    if Trim(Part) <> '' then
+      FGroupByFields.Add(NormalizeIdentifier(Part));
   Result := Self;
 end;
 function TSQLBuilder.GroupBy(AFields: array of string): TSQLBuilder;
@@ -1859,9 +1979,15 @@ begin
       jtInner: JoinText := 'INNER JOIN';
       jtLeft: JoinText := 'LEFT JOIN';
       jtRight: JoinText := 'RIGHT JOIN';
-      jtFull: JoinText := 'FULL JOIN';
+      jtFull:
+        begin
+          if FDatabaseType = dbMySQL then
+            raise Exception.Create('FULL JOIN is not supported by MySQL. ' +
+              'Use LEFT JOIN ... UNION ... RIGHT JOIN instead.');
+          JoinText := 'FULL JOIN';
+        end;
     end;
-    Result := Result + ' ' + JoinText + ' ' + FJoinClauses[I].Table + 
+    Result := Result + ' ' + JoinText + ' ' + FJoinClauses[I].Table +
               ' ON ' + FJoinClauses[I].Condition;
   end;
 end;
@@ -1984,15 +2110,6 @@ begin
 end;
 
 // Função auxiliar para limpar operadores duplicados
-function TSQLBuilder.CleanOperator(const AValue: string; const AOperator: string): string;
-begin
-  Result := AValue;
-  // Remove o operador do valor se ele estiver presente
-  if Pos(AOperator, Result) = 1 then
-    Result := Trim(Copy(Result, Length(AOperator) + 1, MaxInt));
-end;
-
-
 function TSQLBuilder.BuildOrderByClause: string;
 var
   I: Integer;
@@ -2000,11 +2117,18 @@ var
 begin
   if FOrderByFields.Count = 0 then
   begin
-    if (FDatabaseType = dbMSSQL) and (FLimit > 0) then
-      Exit(' ORDER BY (SELECT NULL)');
+    // SQL Server exige ORDER BY para OFFSET/FETCH.
+    if (FDatabaseType = dbMSSQL) and ((FLimit > 0) or (FOffset > 0)) then
+    begin
+      // Com UNION/INTERSECT/EXCEPT o ORDER BY precisa referenciar o select list.
+      if FUnions.Count > 0 then
+        Exit(' ORDER BY 1')
+      else
+        Exit(' ORDER BY (SELECT NULL)');
+    end;
     Exit('');
   end;
-    
+
   Result := ' ORDER BY ';
   for I := 0 to FOrderByFields.Count - 1 do
   begin
@@ -2114,57 +2238,67 @@ end;
 function TSQLBuilder.BuildLimitOffsetClause: string;
 begin
   Result := '';
-  
-  if FLimit <= 0 then
+
+  if (FLimit <= 0) and (FOffset <= 0) then
     Exit;
-    
+
   case FDatabaseType of
-    dbMySQL, dbSQLite:
+    dbMySQL:
       begin
-        Result := ' LIMIT ' + FLimit.ToString;
+        // MySQL nao aceita OFFSET sem LIMIT.
+        if FLimit > 0 then
+          Result := ' LIMIT ' + FLimit.ToString
+        else
+          Result := ' LIMIT 18446744073709551615';
         if FOffset > 0 then
           Result := Result + ' OFFSET ' + FOffset.ToString;
       end;
-      
-    dbPostgreSQL:
+
+    dbSQLite:
       begin
-        Result := ' LIMIT ' + FLimit.ToString;
+        if FLimit > 0 then
+          Result := ' LIMIT ' + FLimit.ToString
+        else
+          Result := ' LIMIT -1';
         if FOffset > 0 then
           Result := Result + ' OFFSET ' + FOffset.ToString;
       end;
-      
+
     dbFirebird:
       begin
-        if FOffset > 0 then
+        if FLimit <= 0 then
+          Result := ' ROWS ' + (FOffset + 1).ToString + ' TO 2147483647'
+        else if FOffset > 0 then
           Result := ' ROWS ' + (FOffset + 1).ToString + ' TO ' + (FOffset + FLimit).ToString
         else
           Result := ' ROWS ' + FLimit.ToString;
       end;
-      
+
     dbMSSQL:
       begin
-        if FOffset > 0 then
-          Result := ' OFFSET ' + FOffset.ToString + ' ROWS FETCH NEXT ' + FLimit.ToString + ' ROWS ONLY'
-        else
-          Result := ' OFFSET 0 ROWS FETCH NEXT ' + FLimit.ToString + ' ROWS ONLY';
+        Result := ' OFFSET ' + FOffset.ToString + ' ROWS';
+        if FLimit > 0 then
+          Result := Result + ' FETCH NEXT ' + FLimit.ToString + ' ROWS ONLY';
       end;
-      
-    dbGeneric:
-      begin
+
+  else // dbPostgreSQL, dbGeneric
+    begin
+      if FLimit > 0 then
         Result := ' LIMIT ' + FLimit.ToString;
-        if FOffset > 0 then
-          Result := Result + ' OFFSET ' + FOffset.ToString;
-      end;
+      if FOffset > 0 then
+        Result := Result + ' OFFSET ' + FOffset.ToString;
+    end;
   end;
 end;
-function TSQLBuilder.ToSQL: string;
+
+function TSQLBuilder.BuildSQL(ACountOnly: Boolean): string;
 var
   I: Integer;
   J: Integer;
   C: Integer;
-  K: Integer;
   SelectFieldsStr: string;
   BaseSQL: string;
+  Body: string;
   UnionSQL: string;
   CteSQL: string;
   OneCteSQL: string;
@@ -2172,40 +2306,65 @@ var
   NewParamName: string;
   BaseParamName: string;
   UnionWord: string;
+  NeedsWrap: Boolean;
 begin
   if FFromTable = '' then
     raise Exception.Create('Table not specified. Use From() method.');
+
+  if FDatabaseType = dbMySQL then
+    for I := 0 to FJoinClauses.Count - 1 do
+      if FJoinClauses[I].JoinType = jtFull then
+        raise Exception.Create('FULL JOIN is not supported by MySQL. ' +
+          'Use LeftJoin/RightJoin or combine two queries with Union.');
+
   FParameters.Clear;
   FParamValues.Clear;
+
+  // COUNT(*) direto so e correto para consultas simples. Com DISTINCT,
+  // GROUP BY ou operacoes de conjunto a consulta e envolvida numa subconsulta
+  // (COUNT(DISTINCT a, b) nao existe no SQL Server nem no PostgreSQL, e
+  // COUNT(*) com GROUP BY devolveria uma linha por grupo).
+  NeedsWrap := ACountOnly and (FDistinct or (FGroupByFields.Count > 0) or (FUnions.Count > 0));
+
   BaseSQL := 'SELECT ';
-  if FDistinct then
-    BaseSQL := BaseSQL + 'DISTINCT ';
-  // Construir a lista de campos manualmente sem aspas
-  if FSelectFields.Count > 0 then
-  begin
-    SelectFieldsStr := '';
-    for I := 0 to FSelectFields.Count - 1 do
-    begin
-      if I > 0 then
-        SelectFieldsStr := SelectFieldsStr + ', ';
-      SelectFieldsStr := SelectFieldsStr + FSelectFields[I];
-    end;
-    BaseSQL := BaseSQL + SelectFieldsStr;
-  end
+  if ACountOnly and not NeedsWrap then
+    BaseSQL := BaseSQL + 'COUNT(*) AS Total'
+  else if ACountOnly and (not FDistinct) and (FUnions.Count = 0) and
+          not ((FDatabaseType = dbMySQL) and (FHavingConditions.Count > 0)) then
+    // GROUP BY simples: o select list nao importa para a contagem e evita
+    // erros de colunas sem nome/duplicadas na tabela derivada (MSSQL/MySQL).
+    // No MySQL o HAVING pode referenciar alias do select, entao ele e mantido.
+    BaseSQL := BaseSQL + '1 AS fluent_row'
   else
-    BaseSQL := BaseSQL + '*';
+  begin
+    if FDistinct then
+      BaseSQL := BaseSQL + 'DISTINCT ';
+    if FSelectFields.Count > 0 then
+    begin
+      SelectFieldsStr := '';
+      for I := 0 to FSelectFields.Count - 1 do
+      begin
+        if I > 0 then
+          SelectFieldsStr := SelectFieldsStr + ', ';
+        SelectFieldsStr := SelectFieldsStr + FSelectFields[I];
+      end;
+      BaseSQL := BaseSQL + SelectFieldsStr;
+    end
+    else
+      BaseSQL := BaseSQL + '*';
+  end;
+
   BaseSQL := BaseSQL + ' FROM ' + FFromTable;
   BaseSQL := BaseSQL + BuildJoinClause;
   BaseSQL := BaseSQL + BuildWhereClause;
   BaseSQL := BaseSQL + BuildGroupByClause;
   BaseSQL := BaseSQL + BuildHavingClause;
+
   if FUnions.Count = 0 then
-  begin
-    Result := BaseSQL + BuildOrderByClause + BuildLimitOffsetClause + ';';
-  end
+    Body := BaseSQL
   else
   begin
-    Result := '(' + BaseSQL + ')';
+    Body := '(' + BaseSQL + ')';
     for I := 0 to FUnions.Count - 1 do
     begin
       UnionSQL := StripEndingSemicolon(FUnions[I].SQL);
@@ -2221,16 +2380,8 @@ begin
           NewParamName := BaseParamName + '_u' + I.ToString + '_' + C.ToString;
           Inc(C);
         end;
-        if NewParamName <> BaseParamName then
-        begin
-          UnionSQL := StringReplace(UnionSQL, ':' + BaseParamName, GetParamPlaceholder(NewParamName), [rfReplaceAll]);
-          UnionSQL := StringReplace(UnionSQL, '@' + BaseParamName, GetParamPlaceholder(NewParamName), [rfReplaceAll]);
-        end
-        else
-        begin
-          UnionSQL := StringReplace(UnionSQL, ':' + BaseParamName, GetParamPlaceholder(NewParamName), [rfReplaceAll]);
-          UnionSQL := StringReplace(UnionSQL, '@' + BaseParamName, GetParamPlaceholder(NewParamName), [rfReplaceAll]);
-        end;
+        UnionSQL := ReplaceParamToken(UnionSQL, ':' + BaseParamName, GetParamPlaceholder(NewParamName));
+        UnionSQL := ReplaceParamToken(UnionSQL, '@' + BaseParamName, GetParamPlaceholder(NewParamName));
         FParameters.Add(NewParamName);
         AddParameter(NewParamName, FUnions[I].ParamValues[J]);
       end;
@@ -2238,10 +2389,15 @@ begin
       if FUnions[I].IsAll then
         UnionWord := UnionWord + ' ALL';
       UnionWord := UnionWord + ' ';
-      Result := Result + UnionWord + '(' + UnionSQL + ')';
+      Body := Body + UnionWord + '(' + UnionSQL + ')';
     end;
-    Result := Result + BuildOrderByClause + BuildLimitOffsetClause + ';';
   end;
+
+  if not ACountOnly then
+    Body := Body + BuildOrderByClause + BuildLimitOffsetClause
+  else if NeedsWrap then
+    Body := 'SELECT COUNT(*) AS Total FROM (' + Body + ') fluent_count';
+
   if FCtes.Count > 0 then
   begin
     CteSQL := '';
@@ -2255,14 +2411,14 @@ begin
       begin
         BaseParamName := FCtes[I].ParamNames[J];
         NewParamName := BaseParamName;
-        K := 1;
+        C := 1;
         while FParameters.IndexOf(NewParamName) >= 0 do
         begin
-          NewParamName := BaseParamName + '_c' + I.ToString + '_' + K.ToString;
-          Inc(K);
+          NewParamName := BaseParamName + '_c' + I.ToString + '_' + C.ToString;
+          Inc(C);
         end;
-        OneCteSQL := StringReplace(OneCteSQL, ':' + BaseParamName, GetParamPlaceholder(NewParamName), [rfReplaceAll]);
-        OneCteSQL := StringReplace(OneCteSQL, '@' + BaseParamName, GetParamPlaceholder(NewParamName), [rfReplaceAll]);
+        OneCteSQL := ReplaceParamToken(OneCteSQL, ':' + BaseParamName, GetParamPlaceholder(NewParamName));
+        OneCteSQL := ReplaceParamToken(OneCteSQL, '@' + BaseParamName, GetParamPlaceholder(NewParamName));
         FParameters.Add(NewParamName);
         AddParameter(NewParamName, FCtes[I].ParamValues[J]);
       end;
@@ -2272,64 +2428,33 @@ begin
       if FCtes[I].IsRecursive then
         HasRecursiveCte := True;
     end;
-    if HasRecursiveCte then
-      Result := 'WITH RECURSIVE ' + CteSQL + ' ' + StripEndingSemicolon(Result) + ';'
+    // SQL Server nao aceita a palavra RECURSIVE (CTEs recursivas usam WITH).
+    if HasRecursiveCte and (FDatabaseType <> dbMSSQL) then
+      Body := 'WITH RECURSIVE ' + CteSQL + ' ' + Body
     else
-      Result := 'WITH ' + CteSQL + ' ' + StripEndingSemicolon(Result) + ';';
+      Body := 'WITH ' + CteSQL + ' ' + Body;
   end;
+
+  Result := Body + ';';
   if Assigned(FOnSQLGenerated) then
     FOnSQLGenerated(Self, Result);
 end;
+
+function TSQLBuilder.ToSQL: string;
+begin
+  Result := BuildSQL(False);
+end;
+
 function TSQLBuilder.ToFormattedSQL(AIndentSize: Integer): string;
 begin
   Result := TSQLFormatter.Format(ToSQL, AIndentSize);
 end;
+
 function TSQLBuilder.ToSQLCount: string;
-var
-  OriginalFields: TStringList;
-  OriginalOrderBy: TList<TOrderByClause>;
-  OriginalLimit: Integer;
-  OriginalOffset: Integer;
-  OriginalDistinct: Boolean;
 begin
-  OriginalFields := TStringList.Create;
-  OriginalFields.Assign(FSelectFields);
-  
-  OriginalOrderBy := TList<TOrderByClause>.Create;
-  for var Item in FOrderByFields do
-    OriginalOrderBy.Add(Item);
-    
-  OriginalLimit := FLimit;
-  OriginalOffset := FOffset;
-  OriginalDistinct := FDistinct;
-  
-  try
-    FSelectFields.Clear;
-    if OriginalDistinct and (OriginalFields.Count > 0) then
-      FSelectFields.Add('COUNT(DISTINCT ' + OriginalFields.CommaText + ') AS Total')
-    else
-      FSelectFields.Add('COUNT(*) AS Total');
-      
-    FOrderByFields.Clear;
-    FLimit := 0;
-    FOffset := 0;
-    FDistinct := False;
-    
-    Result := ToSQL;
-  finally
-    FSelectFields.Assign(OriginalFields);
-    FOrderByFields.Clear;
-    for var Item in OriginalOrderBy do
-      FOrderByFields.Add(Item);
-      
-    FLimit := OriginalLimit;
-    FOffset := OriginalOffset;
-    FDistinct := OriginalDistinct;
-    
-    OriginalFields.Free;
-    OriginalOrderBy.Free;
-  end;
+  Result := BuildSQL(True);
 end;
+
 function TSQLBuilder.ToFormattedSQLCount(AIndentSize: Integer): string;
 begin
   Result := TSQLFormatter.Format(ToSQLCount, AIndentSize);
@@ -2338,6 +2463,19 @@ function TSQLBuilder.GetParameters: TArray<string>;
 begin
   Result := FParameters.ToStringArray;
 end;
+function TSQLBuilder.ToSQLParams: TSQLParams;
+var
+  I: Integer;
+begin
+  SetLength(Result, FParameters.Count);
+  for I := 0 to FParameters.Count - 1 do
+  begin
+    Result[I].Name := FParameters[I];
+    Result[I].Value := GetParamValue(FParameters[I]);
+    Result[I].DataType := ftUnknown;
+  end;
+end;
+
 function TSQLBuilder.GetParamValue(const AParamName: string): Variant;
 begin
   if not FParamValues.TryGetValue(AParamName, Result) then

@@ -40,7 +40,10 @@ interface
 
 uses
   System.SysUtils,
+  System.StrUtils,
   System.Variants,
+  Data.DB,
+  FireDAC.Stan.Param,
   FireDAC.Comp.Client,
   uFluentORM.Types,
   uFluentORM.Executor;
@@ -51,12 +54,18 @@ type
     function CreateConnection: TFDConnection;
   end;
 
-  TFireDACSQLExecutor = class(TInterfacedObject, ISQLExecutor, ISQLDriverInfo, ISQLTransactionalExecutor, ISQLIdentityExecutor)
+  TFireDACSQLExecutor = class(TInterfacedObject, ISQLExecutor, ISQLDriverInfo, ISQLDialectInfo,
+    ISQLTransactionalExecutor, ISQLIdentityExecutor, ISQLQueryExecutor)
   private
     FConnection: TFDConnection;
     FOwnsConnection: Boolean;
     class function NormalizeParamName(const AName: string): string; static;
     function ExecuteScalarNoParams(const ASQL: string): Variant;
+    procedure BindParams(AQuery: TFDQuery; const AParams: TSQLParams);
+  public
+    // Normaliza o DriverID do FireDAC (inclusive drivers customizados, ex.:
+    // 'MySQL8', 'MSSQL2019', 'PG_Prod') para: MYSQL, MSSQL, PG, SQLITE, FB...
+    class function NormalizeDriverID(const ADriverID: string): string; static;
   public
     constructor Create(AConnection: TFDConnection);
     constructor CreateFromFactory(const AConnectionFactory: IFireDACConnectionFactory);
@@ -64,6 +73,16 @@ type
     function Execute(const ASQL: string; const AParams: TSQLParams): Integer;
     function ExecuteScalar(const ASQL: string; const AParams: TSQLParams): Variant;
     function GetDriverID: string;
+    function GetDatabaseType: TSQLDatabaseType;
+    /// <summary>
+    /// Opens a SELECT and returns the dataset (the caller owns and frees it).
+    /// Typical use with the builder:
+    ///   SQLText := Builder.ToSQL;
+    ///   Q := Exec.OpenQuery(SQLText, Builder.ToSQLParams);
+    /// </summary>
+    function OpenQuery(const ASQL: string; const AParams: TSQLParams): TFDQuery;
+    function OpenDataSet(const ASQL: string; const AParams: TSQLParams): TDataSet;
+    property Connection: TFDConnection read FConnection;
     function GetLastInsertedId: Variant;
     procedure BeginTransaction;
     procedure Commit;
@@ -127,17 +146,44 @@ begin
     Delete(Result, 1, 1);
 end;
 
+function NormalizeGuidText(const AValue: string): string;
+begin
+  Result := Trim(AValue);
+  if (Result <> '') and (Result[1] <> '{') then
+    Result := '{' + Result + '}';
+end;
+
+procedure TFireDACSQLExecutor.BindParams(AQuery: TFDQuery; const AParams: TSQLParams);
+var
+  I: Integer;
+  P: TFDParam;
+begin
+  for I := 0 to High(AParams) do
+  begin
+    P := AQuery.ParamByName(NormalizeParamName(AParams[I].Name));
+    if AParams[I].DataType <> ftUnknown then
+      P.DataType := AParams[I].DataType
+    else if VarIsNull(AParams[I].Value) or VarIsEmpty(AParams[I].Value) then
+      // NULL sem tipo gera "[FireDAC] Param data type is unknown".
+      P.DataType := ftWideString;
+    if VarIsNull(AParams[I].Value) or VarIsEmpty(AParams[I].Value) then
+      P.Clear
+    else if (P.DataType = ftGuid) and VarIsStr(AParams[I].Value) then
+      P.AsGUID := StringToGUID(NormalizeGuidText(VarToStr(AParams[I].Value)))
+    else
+      P.Value := AParams[I].Value;
+  end;
+end;
+
 function TFireDACSQLExecutor.Execute(const ASQL: string; const AParams: TSQLParams): Integer;
 var
   Q: TFDQuery;
-  I: Integer;
 begin
   Q := TFDQuery.Create(nil);
   try
     Q.Connection := FConnection;
     Q.SQL.Text := ASQL;
-    for I := 0 to High(AParams) do
-      Q.ParamByName(NormalizeParamName(AParams[I].Name)).Value := AParams[I].Value;
+    BindParams(Q, AParams);
     Q.ExecSQL;
     Result := Q.RowsAffected;
   finally
@@ -149,14 +195,12 @@ function TFireDACSQLExecutor.ExecuteScalar(const ASQL: string;
   const AParams: TSQLParams): Variant;
 var
   Q: TFDQuery;
-  I: Integer;
 begin
   Q := TFDQuery.Create(nil);
   try
     Q.Connection := FConnection;
     Q.SQL.Text := ASQL;
-    for I := 0 to High(AParams) do
-      Q.ParamByName(NormalizeParamName(AParams[I].Name)).Value := AParams[I].Value;
+    BindParams(Q, AParams);
     Q.Open;
     if not Q.Eof then
       Result := Q.Fields[0].Value
@@ -167,35 +211,93 @@ begin
   end;
 end;
 
+function TFireDACSQLExecutor.OpenQuery(const ASQL: string;
+  const AParams: TSQLParams): TFDQuery;
+begin
+  Result := TFDQuery.Create(nil);
+  try
+    Result.Connection := FConnection;
+    Result.SQL.Text := ASQL;
+    BindParams(Result, AParams);
+    Result.Open;
+  except
+    Result.Free;
+    raise;
+  end;
+end;
+
+function TFireDACSQLExecutor.OpenDataSet(const ASQL: string;
+  const AParams: TSQLParams): TDataSet;
+begin
+  Result := OpenQuery(ASQL, AParams);
+end;
+
 function TFireDACSQLExecutor.ExecuteScalarNoParams(const ASQL: string): Variant;
 begin
   Result := ExecuteScalar(ASQL, []);
 end;
 
 function TFireDACSQLExecutor.GetLastInsertedId: Variant;
-var
-  DriverID: string;
 begin
-  DriverID := GetDriverID;
+  case GetDatabaseType of
+    dbMySQL:
+      Result := ExecuteScalarNoParams('SELECT LAST_INSERT_ID()');
+    dbPostgreSQL:
+      Result := ExecuteScalarNoParams('SELECT LASTVAL()');
+    // SCOPE_IDENTITY() executed in another command/batch returns NULL on SQL
+    // Server (each query runs in its own scope). @@IDENTITY is session scoped.
+    // TRepository uses "INSERT ... OUTPUT INSERTED.<pk>" for SQL Server and
+    // does not depend on this method there.
+    dbMSSQL:
+      Result := ExecuteScalarNoParams('SELECT CAST(@@IDENTITY AS BIGINT)');
+    dbSQLite:
+      Result := ExecuteScalarNoParams('SELECT last_insert_rowid()');
+  else
+    // Firebird/Oracle/generic ODBC do not have a portable session function.
+    // (The repository currently uses RETURNING only for PostgreSQL; Firebird
+    // callers that need the key should implement ISQLIdentityExecutor.)
+    Result := Null;
+  end;
+end;
 
-  if DriverID = 'MYSQL' then
-    Exit(ExecuteScalarNoParams('SELECT LAST_INSERT_ID()'));
+function TFireDACSQLExecutor.GetDatabaseType: TSQLDatabaseType;
+begin
+  Result := TSQLDialect.FromDriverID(GetDriverID);
+end;
 
-  if (DriverID = 'MSSQL') or (DriverID = 'ODBC') then
-    Exit(ExecuteScalarNoParams('SELECT SCOPE_IDENTITY()'));
-
-  if DriverID = 'PG' then
-    Exit(ExecuteScalarNoParams('SELECT LASTVAL()'));
-
-  if DriverID = 'SQLITE' then
-    Exit(ExecuteScalarNoParams('SELECT last_insert_rowid()'));
-
-  Exit(ExecuteScalarNoParams('SELECT @@IDENTITY'));
+class function TFireDACSQLExecutor.NormalizeDriverID(const ADriverID: string): string;
+begin
+  Result := UpperCase(Trim(ADriverID));
+  if StartsText('MYSQL', Result) or StartsText('MARIA', Result) then
+    Result := 'MYSQL'
+  else if StartsText('MSSQL', Result) or StartsText('SQLSERVER', Result) then
+    Result := 'MSSQL'
+  else if StartsText('PG', Result) or StartsText('POSTGRE', Result) then
+    Result := 'PG'
+  else if StartsText('SQLITE', Result) then
+    Result := 'SQLITE'
+  else if StartsText('FB', Result) or StartsText('FIREBIRD', Result) then
+    Result := 'FB';
 end;
 
 function TFireDACSQLExecutor.GetDriverID: string;
+var
+  Raw: string;
 begin
-  Result := UpperCase(Trim(FConnection.Params.Values['DriverID']));
+  // Params.Values['DriverID'] fica vazio quando a conexao usa
+  // ConnectionDefName (caso do pool). DriverName resolve pelo ConnectionDef.
+  Raw := '';
+  try
+    Raw := FConnection.DriverName;
+  except
+    Raw := '';
+  end;
+  if Trim(Raw) = '' then
+    Raw := FConnection.Params.Values['DriverID'];
+  if (Trim(Raw) = '') and (FConnection.ConnectionDefName <> '') then
+    Raw := FDManager.ConnectionDefs.ConnectionDefByName(
+      FConnection.ConnectionDefName).Params.Values['DriverID'];
+  Result := NormalizeDriverID(Raw);
 end;
 
 procedure TFireDACSQLExecutor.BeginTransaction;

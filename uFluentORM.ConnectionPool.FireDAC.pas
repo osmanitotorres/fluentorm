@@ -60,6 +60,7 @@ type
     FConnectionDefName: string;
     class var FLock: TObject;
     class var FRegistry: TDictionary<string, string>;
+    class var FCreatedDefs: TStringList;
     class var FDefCounter: Integer;
     class constructor CreateClass;
     class destructor DestroyClass;
@@ -92,13 +93,37 @@ class constructor TFireDACPooledConnectionFactory.CreateClass;
 begin
   FLock := TObject.Create;
   FRegistry := TDictionary<string, string>.Create;
+  FCreatedDefs := TStringList.Create;
+  FCreatedDefs.CaseSensitive := False;
   FDefCounter := 0;
 end;
 
 class destructor TFireDACPooledConnectionFactory.DestroyClass;
+var
+  I: Integer;
 begin
-  FRegistry.Free;
+  // Remove the connection definitions created by this factory. Without this
+  // FDManager keeps them registered (and the pool alive) until the process ends.
+  TMonitor.Enter(FLock);
+  try
+    if Assigned(FCreatedDefs) then
+    begin
+      for I := 0 to FCreatedDefs.Count - 1 do
+        try
+          FDManager.DeleteConnectionDef(FCreatedDefs[I]);
+        except
+          // Finalization must not raise.
+        end;
+      FCreatedDefs.Free;
+      FCreatedDefs := nil;
+    end;
+    FRegistry.Free;
+    FRegistry := nil;
+  finally
+    TMonitor.Exit(FLock);
+  end;
   FLock.Free;
+  FLock := nil;
 end;
 
 class function TFireDACPooledConnectionFactory.BuildRegistryKey(
@@ -163,6 +188,7 @@ begin
       Inc(FDefCounter);
       Result := 'FluentORMPoolDef_' + IntToStr(FDefCounter);
       FDManager.AddConnectionDef(Result, DriverID, DefParams);
+      FCreatedDefs.Add(Result);
       FRegistry.Add(Key, Result);
     finally
       DefParams.Free;

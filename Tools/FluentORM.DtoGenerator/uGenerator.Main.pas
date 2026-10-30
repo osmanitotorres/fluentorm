@@ -16,7 +16,7 @@ uses
   Winapi.ActiveX;
 
 type
-  TDbKind = (dbMySQL, dbSQLServer);
+  TDbKind = (dbMySQL, dbSQLServer, dbPostgreSQL);
   TNullableMode = (nmNative, nmVariant);
 
   TColumnMeta = record
@@ -41,6 +41,7 @@ type
     ADOProvider: string; // SQL Server
     ADOProviderMySQL: string; // MySQL
     MySQLODBCDriver: string;
+  PostgreSQLODBCDriver: string;
     ConnectionString: string; // optional override
     NullableMode: TNullableMode;
   end;
@@ -68,6 +69,7 @@ begin
   Result.ADOProvider := 'SQLOLEDB';
   Result.ADOProviderMySQL := 'MSDASQL';
   Result.MySQLODBCDriver := 'MySQL ODBC 9.6 Unicode Driver';
+  Result.PostgreSQLODBCDriver := 'PostgreSQL Unicode(x64)';
   Result.ConnectionString := '';
   Result.NullableMode := nmNative;
 
@@ -90,8 +92,11 @@ begin
         Result.DbKind := dbMySQL
       else if SameText(Value, 'sqlserver') or SameText(Value, 'mssql') then
         Result.DbKind := dbSQLServer
+      else if SameText(Value, 'postgres') or SameText(Value, 'postgresql') or
+              SameText(Value, 'pg') then
+        Result.DbKind := dbPostgreSQL
       else
-        raise Exception.Create('Invalid --db. Use mysql or sqlserver.');
+        raise Exception.Create('Invalid --db. Use mysql, sqlserver or postgres.');
     end
     else if Key = 'server' then
       Result.Server := Value
@@ -115,6 +120,8 @@ begin
       Result.ADOProviderMySQL := Value
     else if Key = 'mysql_odbc_driver' then
       Result.MySQLODBCDriver := Value
+    else if Key = 'pg_odbc_driver' then
+      Result.PostgreSQLODBCDriver := Value
     else if Key = 'connstr' then
       Result.ConnectionString := Value
     else if Key = 'nullable_mode' then
@@ -140,6 +147,13 @@ begin
     if Result.SchemaName = '' then
       Result.SchemaName := Result.Database;
   end
+  else if Result.DbKind = dbPostgreSQL then
+  begin
+    if Result.Port = 0 then
+      Result.Port := 5432;
+    if Result.SchemaName = '' then
+      Result.SchemaName := 'public';
+  end
   else
   begin
     if Result.Port = 0 then
@@ -153,16 +167,18 @@ procedure PrintUsage;
 begin
   Writeln('FluentORM DTO Generator');
   Writeln('Usage:');
-  Writeln('  --db=mysql|sqlserver --server=localhost --port=3306 --database=chat_database');
+  Writeln('  --db=mysql|sqlserver|postgres --server=localhost --port=3306 --database=chat_database');
   Writeln('  --user=root --password=root --schema=dbo --table=usuario --output=.\DTOs');
   Writeln('  --ado_provider=SQLOLEDB');
   Writeln('  --ado_provider_mysql=MSDASQL --mysql_odbc_driver="MySQL ODBC 9.6 Unicode Driver"');
+  Writeln('  --pg_odbc_driver="PostgreSQL Unicode(x64)"');
   Writeln('  --connstr="Provider=...;Data Source=...;..."');
   Writeln('  --nullable_mode=native|variant');
   Writeln('Notes:');
   Writeln('  - --table optional. If omitted, generates all tables in schema.');
   Writeln('  - MySQL default schema is database name.');
   Writeln('  - SQL Server default schema is dbo (connection via ADO).');
+  Writeln('  - PostgreSQL default schema is public (ADO + psqlODBC driver).');
   Writeln('  - --connstr overrides provider/server/port/database/user/password.');
   Writeln('  - default nullable mode is native.');
 end;
@@ -194,7 +210,7 @@ begin
 
   if Result = '' then
     Result := 'Field';
-  if not (Result[1] in ['A'..'Z', 'a'..'z', '_']) then
+  if not CharInSet(Result[1], ['A'..'Z', 'a'..'z', '_']) then
     Result := '_' + Result;
 end;
 
@@ -219,6 +235,7 @@ begin
     SameText(ADelphiType, 'Currency') or
     SameText(ADelphiType, 'Double') or
     SameText(ADelphiType, 'TDateTime') or
+  SameText(ADelphiType, 'TDate') or
     SameText(ADelphiType, 'TTime');
 end;
 
@@ -231,6 +248,15 @@ begin
     SameText(AColumnName, 'updated_at');
 end;
 
+function IsRowVersionColumn(const ADbType: string; ADbKind: TDbKind): Boolean;
+var
+  T: string;
+begin
+  // SQL Server "timestamp" is a synonym of rowversion (binary(8)), not a date.
+  T := LowerCase(Trim(ADbType));
+  Result := (ADbKind = dbSQLServer) and ((T = 'timestamp') or (T = 'rowversion'));
+end;
+
 function MapDbTypeToDelphi(const ADbType, AColumnType: string; ADbKind: TDbKind): string;
 var
   T: string;
@@ -239,35 +265,40 @@ begin
   T := LowerCase(Trim(ADbType));
   CT := LowerCase(Trim(AColumnType));
 
+  if IsRowVersionColumn(T, ADbKind) then
+    Exit('TBytes');
+
   if (ADbKind = dbMySQL) and (T = 'tinyint') and (Pos('(1)', CT) > 0) then
     Exit('Boolean');
 
-  if (T = 'tinyint') or (T = 'smallint') then
+  if (T = 'tinyint') or (T = 'smallint') or (T = 'int2') or (T = 'smallserial') then
     Exit('SmallInt');
-  if (T = 'int') or (T = 'integer') then
+  if (T = 'int') or (T = 'integer') or (T = 'int4') or (T = 'mediumint') or (T = 'serial') then
     Exit('Integer');
-  if (T = 'bigint') then
+  if (T = 'bigint') or (T = 'int8') or (T = 'bigserial') then
     Exit('Int64');
   if (T = 'bit') or (T = 'boolean') or (T = 'bool') then
     Exit('Boolean');
-  if (T = 'guid') or (T = 'uniqueidentifier') then
+  if (T = 'guid') or (T = 'uniqueidentifier') or (T = 'uuid') then
     Exit('TGuid');
   if (T = 'blob') or (T = 'binary') or (T = 'varbinary') or (T = 'image') or
-     (T = 'longblob') or (T = 'mediumblob') then
+     (T = 'longblob') or (T = 'mediumblob') or (T = 'tinyblob') or (T = 'bytea') then
     Exit('TBytes');
   if (T = 'decimal') or (T = 'numeric') or (T = 'money') or (T = 'smallmoney') then
     Exit('Currency');
-  if (T = 'float') or (T = 'real') or (T = 'double') or (T = 'double precision') then
+  if (T = 'float') or (T = 'real') or (T = 'double') or (T = 'double precision') or
+     (T = 'float4') or (T = 'float8') then
     Exit('Double');
-  if (T = 'date') or (T = 'datetime') or (T = 'datetime2') or (T = 'smalldatetime') or
-     (T = 'timestamp') then
+  if (T = 'date') then
+    Exit('TDate');
+  if (T = 'datetime') or (T = 'datetime2') or (T = 'smalldatetime') or
+     (T = 'datetimeoffset') or (T = 'timestamp') or
+     (T = 'timestamp without time zone') or (T = 'timestamp with time zone') or
+     (T = 'timestamptz') then
     Exit('TDateTime');
-  if (T = 'time') then
+  if (T = 'time') or (T = 'time without time zone') or (T = 'time with time zone') then
     Exit('TTime');
-  if (T = 'char') or (T = 'nchar') or (T = 'varchar') or (T = 'nvarchar') or
-     (T = 'text') or (T = 'ntext') or (T = 'longtext') or (T = 'mediumtext') then
-    Exit('string');
-
+  // char/varchar/text/nvarchar/ntext/character varying/json/jsonb/xml/citext/enum...
   Result := 'string';
 end;
 
@@ -311,6 +342,75 @@ begin
     'User ID=' + Opt.UserName + ';' +
     'Password=' + Opt.Password + ';' +
     'Persist Security Info=False;';
+end;
+
+function CreatePostgreSQLADOConnectionString(const Opt: TGeneratorOptions): string;
+begin
+  if Opt.ConnectionString <> '' then
+    Exit(Opt.ConnectionString);
+
+  // ADO -> OLE DB provider for ODBC -> psqlODBC driver.
+  Result :=
+    'Provider=MSDASQL;' +
+    'Extended Properties="Driver={' + Opt.PostgreSQLODBCDriver + '};' +
+    'Server=' + Opt.Server + ';' +
+    'Port=' + Opt.Port.ToString + ';' +
+    'Database=' + Opt.Database + ';' +
+    'Uid=' + Opt.UserName + ';' +
+    'Pwd=' + Opt.Password + ';"';
+end;
+
+function LoadColumnsPostgreSQL(AConn: TADOConnection; const Opt: TGeneratorOptions;
+  const ATableName: string): TArray<TColumnMeta>;
+var
+  Q: TADOQuery;
+  L: TList<TColumnMeta>;
+  C: TColumnMeta;
+begin
+  L := TList<TColumnMeta>.Create;
+  Q := TADOQuery.Create(nil);
+  try
+    Q.Connection := AConn;
+    Q.ParamCheck := False;
+    Q.SQL.Text :=
+      'SELECT c.column_name, c.data_type, c.udt_name, c.is_nullable, ' +
+      '       CASE WHEN pk.column_name IS NOT NULL THEN 1 ELSE 0 END AS is_pk, ' +
+      '       CASE WHEN c.is_identity = ''YES'' OR c.column_default LIKE ''nextval(%'' ' +
+      '            THEN 1 ELSE 0 END AS is_auto ' +
+      'FROM information_schema.columns c ' +
+      'LEFT JOIN ( ' +
+      '  SELECT ku.table_schema, ku.table_name, ku.column_name ' +
+      '  FROM information_schema.table_constraints tc ' +
+      '  JOIN information_schema.key_column_usage ku ' +
+      '    ON ku.constraint_name = tc.constraint_name ' +
+      '   AND ku.table_schema = tc.table_schema ' +
+      '   AND ku.table_name = tc.table_name ' +
+      '  WHERE tc.constraint_type = ''PRIMARY KEY'' ' +
+      ') pk ON pk.table_schema = c.table_schema AND pk.table_name = c.table_name ' +
+      '     AND pk.column_name = c.column_name ' +
+      'WHERE c.table_schema = ' + QuotedStr(Opt.SchemaName) +
+      '  AND c.table_name = ' + QuotedStr(ATableName) + ' ' +
+      'ORDER BY c.ordinal_position';
+    Q.Open;
+    while not Q.Eof do
+    begin
+      C.ColumnName := Q.FieldByName('column_name').AsString;
+      C.DataType := Q.FieldByName('data_type').AsString;
+      // USER-DEFINED (enums, citext...) and ARRAY: udt_name carries the real type.
+      if SameText(C.DataType, 'USER-DEFINED') then
+        C.DataType := Q.FieldByName('udt_name').AsString;
+      C.ColumnType := Q.FieldByName('udt_name').AsString;
+      C.IsPrimaryKey := Q.FieldByName('is_pk').AsInteger = 1;
+      C.IsIdentity := Q.FieldByName('is_auto').AsInteger = 1;
+      C.IsNullable := SameText(Q.FieldByName('is_nullable').AsString, 'YES');
+      L.Add(C);
+      Q.Next;
+    end;
+    Result := L.ToArray;
+  finally
+    Q.Free;
+    L.Free;
+  end;
 end;
 
 function LoadTablesMySQL(AConn: TADOConnection; const Opt: TGeneratorOptions): TArray<string>;
@@ -483,6 +583,7 @@ begin
     SL.Add('interface');
     SL.Add('');
     SL.Add('uses');
+    SL.Add('  System.SysUtils,'); // TBytes
     SL.Add('  uFluentORM.Attributes;');
     SL.Add('');
     SL.Add('type');
@@ -507,7 +608,8 @@ begin
       DelphiType := MapDbTypeToDelphi(C.DataType, C.ColumnType, ADbKind);
       if (ANullableMode = nmVariant) and C.IsNullable and IsValueType(DelphiType) then
         DelphiType := 'Variant';
-      IsReadOnly := IsAutoReadOnlyColumn(C.ColumnName);
+      IsReadOnly := IsAutoReadOnlyColumn(C.ColumnName) or
+                    IsRowVersionColumn(C.DataType, ADbKind);
       if C.IsPrimaryKey then
         SL.Add('    [Key(' + BoolToLiteral(C.IsIdentity) + ')]');
       if IsReadOnly then
@@ -542,12 +644,17 @@ begin
   ADOConn := TADOConnection.Create(nil);
   try
     ADOConn.LoginPrompt := False;
-    if Opt.DbKind = dbMySQL then
-      ADOConn.ConnectionString := CreateMySQLADOConnectionString(Opt)
+    case Opt.DbKind of
+      dbMySQL:
+        ADOConn.ConnectionString := CreateMySQLADOConnectionString(Opt);
+      dbPostgreSQL:
+        ADOConn.ConnectionString := CreatePostgreSQLADOConnectionString(Opt);
     else
       ADOConn.ConnectionString := CreateSQLServerADOConnectionString(Opt);
+    end;
     ADOConn.Connected := True;
 
+    // INFORMATION_SCHEMA.TABLES has the same shape on the three databases.
     if Opt.DbKind = dbMySQL then
       Tables := LoadTablesMySQL(ADOConn, Opt)
     else
@@ -558,10 +665,14 @@ begin
 
     for TableName in Tables do
     begin
-      if Opt.DbKind = dbMySQL then
-        Cols := LoadColumnsMySQL(ADOConn, Opt, TableName)
+      case Opt.DbKind of
+        dbMySQL:
+          Cols := LoadColumnsMySQL(ADOConn, Opt, TableName);
+        dbPostgreSQL:
+          Cols := LoadColumnsPostgreSQL(ADOConn, Opt, TableName);
       else
         Cols := LoadColumnsSQLServer(ADOConn, Opt, TableName);
+      end;
 
       UnitText := BuildDtoUnitText(TableName, Cols, Opt.DbKind, Opt.NullableMode);
       FileName := TPath.Combine(Opt.OutputDir, 'uDTO_' + ToPascalIdentifier(TableName) + '.pas');

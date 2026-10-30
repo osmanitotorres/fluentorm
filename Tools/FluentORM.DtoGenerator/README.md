@@ -4,6 +4,7 @@ Gerador automatico de DTOs no padrao do FluentORM para tabelas de:
 
 - MySQL
 - SQL Server (MSSQL)
+- PostgreSQL (via ADO + driver ODBC psqlODBC)
 
 ## Objetivo
 
@@ -17,6 +18,9 @@ Ler metadata de tabelas via `INFORMATION_SCHEMA` e gerar units Delphi com:
 Regras adicionais implementadas:
 
 - MySQL `tinyint(1)` -> `Boolean`
+- SQL Server `timestamp`/`rowversion` -> `TBytes` com `[ReadOnly]` (nao e data)
+- PostgreSQL: `uuid` -> `TGuid`, `bytea` -> `TBytes`, `timestamp [with|without time zone]` -> `TDateTime`, `serial`/`identity` -> `[Key(True)]`
+- `date` -> `TDate`, `time` -> `TTime`
 - Colunas nullable de tipos escalares com `--nullable_mode=native` (padrao) mantem tipo Delphi nativo
 - Opcional: `--nullable_mode=variant` para representar nullable escalar como `Variant`
 - Colunas de auditoria (`data_criacao`, `data_atualizacao`, `created_at`, `updated_at`) recebem `[ReadOnly]`
@@ -67,7 +71,7 @@ FluentORM.DtoGenerator.exe --db=sqlserver --server=localhost --port=57436 --data
 
 ## Parametros
 
-- `--db=mysql|sqlserver`
+- `--db=mysql|sqlserver|postgres`
 - `--server=...`
 - `--port=...` (opcional, padrao 3306 MySQL / 1433 SQL Server)
 - `--database=...`
@@ -79,6 +83,7 @@ FluentORM.DtoGenerator.exe --db=sqlserver --server=localhost --port=57436 --data
 - `--ado_provider=...` (opcional para SQL Server; padrao `SQLOLEDB`)
 - `--ado_provider_mysql=...` (opcional para MySQL; padrao `MSDASQL`)
 - `--mysql_odbc_driver=...` (opcional para MySQL; padrao `MySQL ODBC 8.0 Unicode Driver`)
+- `--pg_odbc_driver=...` (opcional para PostgreSQL; padrao `PostgreSQL Unicode(x64)`)
 - `--connstr=...` (opcional; sobrescreve a string de conexao inteira)
 - `--nullable_mode=native|variant` (opcional; padrao `native`)
 
@@ -87,3 +92,10 @@ FluentORM.DtoGenerator.exe --db=sqlserver --server=localhost --port=57436 --data
 - ADO disponivel no Windows.
 - Para MySQL via `MSDASQL`, driver ODBC do MySQL instalado.
 - Para SQL Server, provider OLE DB instalado (`SQLOLEDB` ou `MSOLEDBSQL`).
+- Para PostgreSQL, driver ODBC psqlODBC instalado (mesma arquitetura do exe: 32 ou 64 bits).
+
+### PostgreSQL
+
+```bash
+FluentORM.DtoGenerator.exe --db=postgres --server=localhost --port=5432 --database=MinhaBase --schema=public --user=postgres --password=senha --table=usuario --output=.\GeneratedDTOs
+```

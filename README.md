@@ -47,7 +47,7 @@ O foco da biblioteca e:
 ## Recursos
 
 - API fluente (`Select`, `From`, `Where`, `AndWhere`, `OrWhere`, etc.).
-- Suporte a `JOIN` (`INNER`, `LEFT`, `RIGHT`, `FULL`).
+- Suporte a `JOIN` (`INNER`, `LEFT`, `RIGHT`, `FULL` - este ultimo nao existe no MySQL).
 - `WHERE` com operadores (`=`, `<>`, `>`, `<`, `>=`, `<=`, `LIKE`, `BETWEEN`, `IN`).
 - `GROUP BY` e `HAVING`.
 - Ordenacao (`ORDER BY`) e paginacao (`Limit`, `Offset`, `Paginate`).
@@ -57,6 +57,8 @@ O foco da biblioteca e:
 - Modo estrito opcional para bloquear SQL raw (`StrictMode`).
 - Hook de observabilidade com evento `OnSQLGenerated`.
 - SQL parametrizado opcional com nomes (`UseNamedParams`).
+- Marcador de parametro `:` por padrao em todos os bancos (configuravel em `ParamPrefix`).
+- Quoting de identificadores por dialeto: `[x]` (SQL Server), `` `x` `` (MySQL), `"x"` (PostgreSQL/Firebird/SQLite).
 - Suporte nativo a `IN`/`NOT IN` sem `Raw` (compativel com `StrictMode` e `UseNamedParams`).
 - Quoting opcional de identificadores por banco (`QuoteIdentifiers`).
 - Quoting consistente tambem em `Fields`, `Field`, alias (`AS`) e `FromSQL(..., Alias)`.
@@ -69,18 +71,56 @@ O foco da biblioteca e:
 - Suporte a CTE (`WITH` e `WITH RECURSIVE`) com SQL literal ou com outro `TSQLBuilder`.
 - Defaults de seguranca ativados: `StrictMode=True` e `UseNamedParams=True`.
 - Camada ORM minima com DTO/RTTI: atributos, metadados em cache, executor desacoplado e `Repository<T>`.
+- `TRepository<T>` com chave gerada devolvida para a entidade nos tres bancos (inclusive SQL Server com trigger) e parametros tipados (`Int64`, `Currency`, `TDate`, `TGUID`, `TBytes`, `Variant`...).
+- Leitura de consultas do builder com `TFireDACSQLExecutor.OpenQuery(SQL, Builder.ToSQLParams)`.
 
 ## Estrutura do projeto
 
 - `uFluentORM.pas`: unit principal do builder SQL.
-- `uFluentORM.Types.pas`: tipos compartilhados (`TSQLParam`, `TSQLParams`).
+- `uFluentORM.Types.pas`: tipos compartilhados (`TSQLParam`, `TSQLParams`, `TSQLDatabaseType`, `TSQLDialect`).
 - `uFluentORM.Attributes.pas`: atributos DTO (`Table`, `Column`, `Key`, `Ignore`, `ReadOnly`).
 - `uFluentORM.Metadata.pas`: leitura RTTI e cache de metadados de entidades.
-- `uFluentORM.Executor.pas`: contrato de execucao SQL desacoplado (`ISQLExecutor`).
+- `uFluentORM.Executor.pas`: contrato de execucao SQL desacoplado (`ISQLExecutor`, `ISQLDialectInfo`, `ISQLIdentityExecutor`).
 - `uFluentORM.Executor.FireDAC.pas`: executor pronto para FireDAC (`TFireDACSQLExecutor`).
+- `uFluentORM.Executor.ADO.pas`: executor ADO (`TADOSQLExecutor`), para SQL Server em edicoes do Delphi sem o driver FireDAC MSSQL.
 - `uFluentORM.ConnectionPool.FireDAC.pas`: factory de conexoes com pool do FireDAC.
 - `uFluentORM.Repository.pas`: CRUD minimo com `TRepository<T>`.
-- `Samples/`: exemplos de uso em aplicacao VCL.
+- `Samples/`: exemplos de uso (VCL em `Sample01`/`Sample02`; console multi-banco em `Sample03_MultiBanco`).
+- `Tests/`: testes de console sem dependencia de servidor.
+- `build.bat`: compila biblioteca, testes, gerador e exemplos com o Delphi instalado e roda os testes (saida em `build.log`).
+- `Tools/FluentORM.DtoGenerator/`: gerador de DTOs a partir do banco (MySQL, SQL Server e PostgreSQL).
+
+## Bancos suportados
+
+O mesmo codigo (builder e `TRepository<T>`) funciona em **MySQL**, **SQL Server** e **PostgreSQL**; Firebird e SQLite tambem sao tratados pelo builder.
+As diferencas de dialeto (quoting, literais, paginacao, chave gerada, tipos de parametro) sao resolvidas automaticamente:
+
+- no builder, por `SQL.SetDatabaseType(dbMySQL | dbMSSQL | dbPostgreSQL ...)`;
+- no repositorio, pelo `DriverID` da conexao FireDAC (`MySQL`, `MSSQL`, `PG`, inclusive drivers customizados como `MySQL80` ou `MSSQL2019`), inclusive quando a conexao vem do pool (`ConnectionDefName`).
+
+Bibliotecas cliente do FireDAC (mesma arquitetura do executavel, 32 ou 64 bits):
+
+| Banco | DriverID | Unit do driver | Cliente necessario |
+|-------|----------|----------------|--------------------|
+| MySQL / MariaDB | `MySQL` | `FireDAC.Phys.MySQL` | `libmysql.dll` ou `libmariadb.dll` |
+| SQL Server | `MSSQL` | `FireDAC.Phys.MSSQL` (*somente Enterprise/Architect*) | ODBC Driver 17/18 for SQL Server |
+| PostgreSQL | `PG` | `FireDAC.Phys.PG` | `libpq.dll` (+ dependencias da pasta `bin` do PostgreSQL) |
+
+No SQL Server, informe a porta junto do servidor (`Server=host,1433`) e, com o ODBC Driver 18 e certificado local, use `Encrypt=No`.
+
+**SQL Server sem FireDAC (Delphi Professional):** o driver `FireDAC.Phys.MSSQL` nao vem nas edicoes Professional/Community. Para elas existe o `TADOSQLExecutor` (`uFluentORM.Executor.ADO.pas`, ADO/OLE DB), com o mesmo contrato do executor FireDAC (`Execute`, `ExecuteScalar`, `OpenQuery`, transacoes) e o mesmo comportamento no `TRepository<T>`:
+
+```pascal
+uses Winapi.ActiveX, uFluentORM.Executor, uFluentORM.Executor.ADO, uFluentORM.Repository;
+
+// Em aplicacoes console: CoInitialize(nil) antes de usar ADO.
+Exec := TADOSQLExecutor.CreateFromConnectionString(
+  TADOSQLExecutor.MSSQLConnectionString('localhost,1433', 'MinhaBase', 'sa', 'senha'),
+  dbMSSQL);
+Repo := TRepository<TUsuarioDTO>.Create(Exec);
+```
+
+Provider recomendado: `MSOLEDBSQL` (Microsoft OLE DB Driver for SQL Server, suporta `date`/`time`/`datetime2` nativos). O `SQLOLEDB` ja vem no Windows, mas devolve `date`/`datetime2` como texto.
 
 ## Tutorial rapido
 
@@ -467,11 +507,15 @@ begin
                  .AndWhere('ativo', True)
                  .ToSQL;
 
-  // Exemplo de SQL gerado (PostgreSQL/SQLite/Firebird):
+  // Exemplo de SQL gerado (PostgreSQL/MySQL/SQLite/Firebird):
   // SELECT * FROM clientes WHERE cidade = :cidade AND idade >= :idade AND ativo = :ativo;
   //
   // Exemplo de SQL gerado (MSSQL):
-  // SELECT * FROM clientes WHERE cidade = @cidade AND idade >= @idade AND ativo = @ativo;
+  // SELECT * FROM clientes WHERE cidade = :cidade AND idade >= :idade AND ativo = :ativo;
+  //
+  // Todos os bancos usam ":" por padrao: FireDAC, Zeos, UniDAC, dbExpress e
+  // ADO reconhecem ":" como marcador de parametro em qualquer driver. Para
+  // emitir o marcador nativo do SQL Server, use SQL.ParamPrefix := '@'.
 
   for ParamName in SQL.GetParameters do
   begin
@@ -1020,7 +1064,7 @@ end;
 
 ## Observacoes
 
-- O builder retorna SQL em string. Se precisar de parametros preparados, adapte a camada de execucao (ex.: FireDAC, dbExpress, Zeos).
+- O builder retorna SQL em string. Os parametros da ultima geracao saem em `ToSQLParams` (formato do `ISQLExecutor`) ou em `GetParameters`/`GetParamValue` para outras camadas (dbExpress, Zeos, UniDAC...).
 - Datas e booleanos sao formatados conforme `TSQLDatabaseType`.
 - Em `StrictMode`, metodos raw geram excecao para evitar SQL livre acidental.
 - Com `UseNamedParams = True`, valores de `WHERE/HAVING/BETWEEN` sao emitidos como placeholders e expostos por `GetParameters`/`GetParamValue`.
@@ -1037,7 +1081,8 @@ end;
 - A partir do GRUPO 11, `Intersect/Except` cobrem os operadores de conjunto mais usados em SQL relacional.
 - A partir do GRUPO 12, `WithCTE/WithRecursiveCTE` permitem estruturar consultas complexas mantendo composicao fluente.
 - Dica de uso: inicie com `Select` e depois aplique `WithCTE/WithRecursiveCTE` na mesma cadeia.
-- Para `Insert` com chave auto-gerada, em PostgreSQL o `Repository` usa `INSERT ... RETURNING <pk>`; nos demais bancos o executor FireDAC usa SQL especifica por driver (`LAST_INSERT_ID`, `SCOPE_IDENTITY`, etc.).
+- Para `Insert` com chave auto-gerada: PostgreSQL usa `INSERT ... RETURNING <pk>`; SQL Server usa `INSERT ... OUTPUT INSERTED.<pk> INTO @fluent_ids` (funciona em tabelas com trigger); MySQL usa `LAST_INSERT_ID()` via executor. O valor gerado e atribuido a propriedade `[Key]` quando o banco devolve a chave.
+- `TRepository<T>.QuoteIdentifiers` vem `True` por padrao (veja "Quoting no repositorio" para as regras de PostgreSQL/Firebird).
 - Seguranca adicional: `WhereNotBetween` nao usa mais caminho raw interno (suporta parametros nomeados).
 - Em `StrictMode`, `FromSQL` e `OrderByRaw` tambem sao bloqueados.
 - Em `StrictMode`, `OrderBy('campo, outro DESC')` continua permitido para identificadores simples.
@@ -1045,24 +1090,132 @@ end;
 ## Compatibilidade SQL por banco
 
 As regras abaixo foram aplicadas para gerar SQL compativel com:
+- `dbMySQL`
 - `dbPostgreSQL`
 - `dbFirebird`
 - `dbSQLite`
 - `dbMSSQL`
 
 Regras de geracao:
-- Datas: literal ISO `'yyyy-mm-dd'` (compativel entre os bancos alvo).
+- Parametros: `:nome` em todos os bancos (FireDAC, Zeos, UniDAC, dbExpress e ADO reconhecem `:`); use `ParamPrefix` para trocar o marcador.
+- Identificadores (`QuoteIdentifiers = True`):
+  - `dbMSSQL`: `[tabela].[coluna]`
+  - `dbMySQL`: `` `tabela`.`coluna` ``
+  - `dbPostgreSQL`, `dbFirebird`, `dbSQLite`: `"tabela"."coluna"`
+  - apenas identificadores simples (incluindo `schema.tabela`) sao quoted; expressoes e aliases com espacos ficam intactos.
+- Datas:
+  - `dbMSSQL`: ISO basico `'yyyymmdd'` (sem hora) ou `'yyyy-mm-ddThh:nn:ss.zzz'` (com hora), independente de `SET DATEFORMAT`/`SET LANGUAGE`.
+  - demais: `'yyyy-mm-dd'` e `'yyyy-mm-dd hh:nn:ss'`.
 - Boolean:
-- `dbPostgreSQL`: `TRUE`/`FALSE`
-- `dbFirebird`: `1`/`0`
-- `dbSQLite`: `1`/`0`
-- `dbMSSQL`: `1`/`0`
+  - `dbPostgreSQL`: `TRUE`/`FALSE`
+  - `dbMySQL`, `dbFirebird`, `dbSQLite`, `dbMSSQL`: `1`/`0`
+- Strings:
+  - aspas simples duplicadas (`'O''Brien'`);
+  - `dbMSSQL`: prefixo `N'...'` para preservar Unicode;
+  - `dbMySQL`: `\` duplicado para nao quebrar literais.
 - Numeros decimais: separador `.` (invariante de locale).
 - Paginacao:
-- `dbPostgreSQL` e `dbSQLite`: `LIMIT ... OFFSET ...`
-- `dbFirebird`: `ROWS ...` / `ROWS ... TO ...`
-- `dbMSSQL`: `OFFSET ... ROWS FETCH NEXT ... ROWS ONLY`
-- No MSSQL, quando ha paginacao sem ordenacao explicita, o builder injeta `ORDER BY (SELECT NULL)` para manter SQL valido.
+  - `dbMySQL` e `dbSQLite`: `LIMIT ... OFFSET ...` (`LIMIT 18446744073709551615` / `LIMIT -1` quando ha apenas offset);
+  - `dbPostgreSQL`: `LIMIT ... OFFSET ...`;
+  - `dbFirebird`: `ROWS ...` / `ROWS ... TO ...`;
+  - `dbMSSQL`: `OFFSET ... ROWS FETCH NEXT ... ROWS ONLY`.
+- No MSSQL, quando ha paginacao sem ordenacao explicita, o builder injeta `ORDER BY (SELECT NULL)`; em consultas com `UNION` usa `ORDER BY 1` (o SQL Server nao aceita `(SELECT NULL)` nesse caso).
+- `FULL JOIN` nao existe no MySQL: o builder lanca excecao e sugere `LEFT/RIGHT JOIN` + `UNION`.
+- `INTERSECT`/`EXCEPT` exigem MySQL 8.0.31+; CTE (`WITH`) exige MySQL 8.0+ e SQL Server 2005+.
+- `LIKE` diferencia maiusculas/minusculas no PostgreSQL; no MySQL e no SQL Server depende da collation da coluna.
+- CTE recursiva: `WITH RECURSIVE` nos bancos que suportam; no SQL Server apenas `WITH`.
+- `ToSQLCount`: consultas com `DISTINCT`, `GROUP BY` ou operacoes de conjunto sao envolvidas em `SELECT COUNT(*) FROM (...) fluent_count`.
+
+### Identidade (chave auto-gerada) no `TRepository<T>`
+
+| Banco | Estrategia | Retorno de `Insert` |
+|-------|------------|---------------------|
+| SQL Server (`dbMSSQL`) | `SET NOCOUNT ON; DECLARE @fluent_ids TABLE(id <tipo>); INSERT ... OUTPUT INSERTED.<pk> INTO @fluent_ids ...; SELECT TOP 1 id FROM @fluent_ids` | `1` |
+| PostgreSQL (`dbPostgreSQL`) | `INSERT ... RETURNING <pk>` | `1` |
+| MySQL (`dbMySQL`) | `INSERT` + `SELECT LAST_INSERT_ID()` | linhas afetadas |
+| SQLite / Firebird / outros | funcao do executor (`last_insert_rowid`/fallback) | linhas afetadas |
+
+O valor gerado e atribuido automaticamente a propriedade `[Key]` quando o banco/executor devolve a chave.
+
+No SQL Server, `OUTPUT INSERTED.x` sem `INTO` falha em tabelas com trigger (erro 334), e `SCOPE_IDENTITY()` executado em outro comando devolve `NULL`. Por isso o insert e enviado num unico batch com `OUTPUT ... INTO` uma variavel de tabela, o que tambem cobre chaves `UNIQUEIDENTIFIER` com `DEFAULT NEWID()`.
+
+### Tipos suportados no `TRepository<T>`
+
+Cada parametro e enviado com o `TFieldType` correspondente ao tipo da propriedade (campo `TSQLParam.DataType`), o que evita conversoes implicitas erradas e o erro do FireDAC "data type is unknown" em valores `NULL`.
+
+| Propriedade Delphi | Parametro | MySQL | SQL Server | PostgreSQL |
+|--------------------|-----------|-------|------------|------------|
+| `Integer`, `SmallInt`, `Byte`... | `ftInteger` | int | int | integer |
+| `Int64`, `Cardinal` | `ftLargeint` | bigint | bigint | bigint |
+| `Boolean` | `ftBoolean` | tinyint(1) | bit | boolean |
+| `Double`, `Single` | `ftFloat` | double | float | double precision |
+| `Currency` | `ftBCD` | decimal | decimal | numeric |
+| `TDateTime` / `TDate` / `TTime` | `ftDateTime` / `ftDate` / `ftTime` | datetime/date/time | datetime2/date/time | timestamp/date/time |
+| `string` | `ftWideString` (`ftWideMemo` acima de 4000 caracteres) | varchar/text | nvarchar | varchar/text |
+| `TGUID` | `ftWideString` sem chaves (CHAR(36)) | char(36) | uniqueidentifier (`ftGuid`) | uuid (`ftGuid`) |
+| `TBytes` | `ftBlob` | blob | varbinary(max) | bytea |
+| `Variant` | inferido (NULL vira `ftWideString`) | qualquer | qualquer | qualquer |
+
+O tipo e decidido pelo tipo *declarado* da propriedade (nao por `TValue.IsType`, que aceita tipos conversiveis e confundiria `Double` com `TDateTime`).
+
+### Leitura de entidades
+
+```pascal
+Cliente := Repo.FindById(10);          // nil se nao existir; quem chama libera
+Lista := Repo.FindAll('nome');         // TObjectList<T> dona dos objetos
+Repo.LoadFromDataSet(Cliente, Query);  // preenche a partir da linha atual de um TDataSet
+```
+
+Requer um executor que implemente `ISQLQueryExecutor` (`TFireDACSQLExecutor` e `TADOSQLExecutor` ja implementam). A entidade e criada pelo construtor sem parametros do DTO, entao valores padrao definidos nele sao respeitados. Colunas `[ReadOnly]` sao lidas normalmente.
+
+### Leitura com o SQL Builder
+
+```pascal
+SQLText := Builder.ToSQL;                                   // gera SQL e parametros
+Q := Exec.OpenQuery(SQLText, Builder.ToSQLParams);          // TFireDACSQLExecutor; quem chama libera Q
+Total := Exec.ExecuteScalar(Builder.ToSQLCount, Builder.ToSQLParams);
+```
+
+### Quoting no repositorio
+
+`TRepository<T>.QuoteIdentifiers` vem `True` por padrao, para que nomes reservados (`user`, `order`...) funcionem. Regras:
+
+- MySQL usa crase e SQL Server usa colchetes. Nesses bancos o quoting nao muda a forma como maiusculas/minusculas sao tratadas.
+- PostgreSQL so recebe aspas quando o nome esta todo em minusculas. Um nome sem aspas e convertido para minusculas pelo banco, entao `[Table('Usuario')]` continua encontrando a tabela `usuario`, como antes.
+- Firebird segue a mesma regra, mas com maiusculas.
+- Se o atributo ja vier com aspas (`[Table('"MinhaTabela"')]`, `` [Column('`x`')] ``, `[Column('[x]')]`), o nome e mantido como esta.
+- `Repo.QuoteIdentifiers := False` gera os nomes exatamente como escritos nos atributos.
+
+## Testes automatizados
+
+O projeto inclui testes de console que nao dependem de servidor:
+
+- `Tests/FluentORM.Tests.dpr`: valida o SQL gerado para MSSQL, PostgreSQL e MySQL (quoting, parametros, literais, paginacao, `ToSQLCount`, `UNION`, CTE, restricoes) e, atraves de um executor fake, o CRUD do `TRepository<T>`: estrategia de chave gerada por banco, tipos dos parametros (`Double` nao vira data, `Currency` -> `ftBCD`, `TGUID`, `TBytes`, `Variant` nulo) e regras de quoting no PostgreSQL.
+- `Tests/FluentORM.MSSQLSmoke.dpr`: gera `Tests/Generated/mssql_smoke.sql` a partir do proprio builder/repositorio, para validar a sintaxe no SQL Server (a tabela de teste tem trigger, para provar o insert com `OUTPUT ... INTO`).
+
+Forma mais simples: rode `build.bat` na raiz (padrao Win64, ou `build.bat Win32`). Ele localiza o Delphi (13, 12 ou 11), compila testes, gerador e exemplos em `Build\<plataforma>`, executa os testes e grava tudo em `build.log`, terminando com `RESULTADO: OK` ou `RESULTADO: FALHOU`.
+
+Compilacao manual dos testes (Win32):
+
+```bat
+set OUT=%TEMP%\fluentorm
+mkdir %OUT%
+dcc32 -B -Q -N0"%OUT%" -E"%OUT%" ^
+  -U"C:\Program Files (x86)\Embarcadero\Studio\37.0\lib\Win32\release" ^
+  -U"." Tests\FluentORM.Tests.dpr
+"%OUT%\FluentORM.Tests.exe"
+```
+
+Saida esperada: `0 failures`.
+
+Validacao opcional no SQL Server local:
+
+```bat
+Tests\FluentORM.MSSQLSmoke.exe Tests\Generated\mssql_smoke.sql
+sqlcmd -S localhost -E -C -b -d tempdb -i Tests\Generated\mssql_smoke.sql
+```
+
+MySQL e PostgreSQL nao precisam de servidor para os testes: o texto SQL e a estrategia de identidade de cada dialeto sao verificados diretamente.
 
 
 # ORM minimo (DTO + RTTI)
@@ -1093,7 +1246,11 @@ type
   end;
 ```
 
-### 2. Implemente `ISQLExecutor`
+### 2. Escolha o executor
+
+Para FireDAC use o pronto `TFireDACSQLExecutor` (veja os itens 4 e 5). Para outra camada de acesso, implemente `ISQLExecutor`;
+implementar tambem `ISQLDialectInfo` (ou `ISQLDriverInfo`) informa o banco ao repositorio, e `ISQLIdentityExecutor` permite devolver a chave gerada no MySQL.
+Use `TSQLParam.DataType` (quando diferente de `ftUnknown`) para tipar cada parametro.
 
 ```pascal
 type
@@ -1246,7 +1403,7 @@ Detalhe importante:
 - isso evita criar multiplos pools para os mesmos parametros;
 - cada conexao e aberta por `ConnectionDefName`, seguindo o modelo recomendado do FireDAC.
 
-## Gerador automatico de DTOs (MySQL e SQL Server)
+## Gerador automatico de DTOs (MySQL, SQL Server e PostgreSQL)
 
 Foi adicionado um projeto de ferramenta em:
 
@@ -1254,10 +1411,14 @@ Foi adicionado um projeto de ferramenta em:
 
 Esse gerador le as tabelas via `INFORMATION_SCHEMA` e cria DTOs no formato do FluentORM (`[Table]`, `[Column]`, `[Key]`).
 
-- MySQL: ADO
-- SQL Server: ADO
+- MySQL: ADO (driver ODBC do MySQL)
+- SQL Server: ADO (OLE DB)
+- PostgreSQL: ADO (driver ODBC psqlODBC)
 - Regras automaticas:
 - `tinyint(1)` (MySQL) vira `Boolean`
+- `timestamp`/`rowversion` (SQL Server) vira `TBytes` com `[ReadOnly]`
+- `uuid`/`uniqueidentifier` vira `TGuid`; `bytea`/`blob`/`varbinary` vira `TBytes`; `date` vira `TDate`
+- chave `identity`/`auto_increment`/`serial` recebe `[Key(True)]`
 - por padrao (`nullable_mode=native`), campos nullable escalares mantem o tipo nativo
 - opcionalmente, `nullable_mode=variant` transforma nullable escalar em `Variant`
 - campos de auditoria (`data_criacao`, `data_atualizacao`, `created_at`, `updated_at`) recebem `[ReadOnly]`
@@ -1272,6 +1433,27 @@ FluentORM.DtoGenerator.exe --db=mysql --server=localhost --port=3306 --database=
 FluentORM.DtoGenerator.exe --db=sqlserver --server=localhost --port=1433 --database=MinhaBase --schema=dbo --user=sa --password=senha --ado_provider=SQLOLEDB --output=.\GeneratedDTOs
 ```
 
+```bash
+FluentORM.DtoGenerator.exe --db=postgres --server=localhost --port=5432 --database=MinhaBase --schema=public --user=postgres --password=senha --pg_odbc_driver="PostgreSQL Unicode(x64)" --output=.\GeneratedDTOs
+```
+
 Detalhes completos em:
 
 - `Tools/FluentORM.DtoGenerator/README.md`
+
+## Exemplos (`Samples/`)
+
+| Exemplo | Tipo | O que mostra |
+|---------|------|--------------|
+| `Samples/Sample01.dpr` | VCL | Builder (varios dialetos) e `TRepository<T>` com MySQL, transacao e pool. |
+| `Samples/Sample02/` | VCL | Carrega a tabela `usuario` em grid a partir do SQL do builder (MySQL, SQL Server ou PostgreSQL). Scripts: `script-MySQL.sql`, `script-MSSQL.sql`, `script-PostgreSQL.sql`. |
+| `Samples/Sample04_MySQL_VCL/` | VCL | Cadastro de clientes completo em MySQL: cria banco/tabela, lista com filtro e paginacao (builder + `ToSQLCount`), `FindById`/`Insert`/`Update`/`DeleteById`, geracao de dados em transacao e log de todo SQL executado. |
+| `Samples/Sample03_MultiBanco/` | Console | O mesmo codigo em MySQL, PostgreSQL (FireDAC) e SQL Server (ADO): CRUD em transacao, rollback automatico, mapeamento de tipos (`Int64`, `TGUID`, `Currency`, `Double`, `TDate`, `TBytes`, `Variant`), builder com paginacao e `ToSQLCount` lido com `OpenQuery`. Scripts em `scripts/` (o do SQL Server cria trigger). |
+
+```bat
+Sample03.exe --db=mysql    --server=localhost --database=fluentorm_demo --user=root     --password=admin
+Sample03.exe --db=mssql    --server=localhost --database=fluentorm_demo --user=sa       --password=senha
+Sample03.exe --db=postgres --server=localhost --database=fluentorm_demo --user=postgres --password=admin
+```
+
+Veja `Samples/Sample03_MultiBanco/README.md` para as opcoes.

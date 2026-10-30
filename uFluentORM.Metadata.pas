@@ -165,7 +165,10 @@ begin
   Result := AType.Name;
   for Attr in AType.GetAttributes do
     if Attr is TableAttribute then
-      Exit(TableAttribute(Attr).Name);
+    begin
+      if Trim(TableAttribute(Attr).Name) <> '' then
+        Exit(Trim(TableAttribute(Attr).Name));
+    end;
 end;
 
 class function TOrmMetadataCache.ResolveColumnName(AProp: TRttiProperty): string;
@@ -175,7 +178,10 @@ begin
   Result := AProp.Name;
   for Attr in AProp.GetAttributes do
     if Attr is ColumnAttribute then
-      Exit(ColumnAttribute(Attr).Name);
+    begin
+      if Trim(ColumnAttribute(Attr).Name) <> '' then
+        Exit(Trim(ColumnAttribute(Attr).Name));
+    end;
 end;
 
 class function TOrmMetadataCache.BuildEntityMeta(AClass: TClass): TOrmEntityMeta;
@@ -202,7 +208,8 @@ begin
     ConventionalKeyIndex := -1;
     for RttiProp in RttiType.GetProperties do
     begin
-      if RttiProp.Parent <> RttiType then
+      // Only properties declared in this class (skip inherited ones).
+      if RttiProp.Parent.Handle <> RttiType.Handle then
         Continue;
 
       if not RttiProp.IsReadable then
