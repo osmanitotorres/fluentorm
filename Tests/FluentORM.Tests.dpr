@@ -81,6 +81,22 @@ type
     property Obs: Variant read FObs write FObs;
   end;
 
+  [Table('pessoa')]
+  TPessoaNullable = class
+  private
+    FId: Integer;
+    FNascimento: Variant;
+    FPontos: Variant;
+  public
+    [Key(True)]
+    [Column('id')]
+    property Id: Integer read FId write FId;
+    [Column('nascimento', ftDate)]
+    property Nascimento: Variant read FNascimento write FNascimento;
+    [Column('pontos')]
+    property Pontos: Variant read FPontos write FPontos;
+  end;
+
   [Table('Cliente')]
   TClienteMixedCase = class
   private
@@ -758,6 +774,35 @@ begin
   end;
 end;
 
+procedure TestColumnDataTypeHint;
+var
+  Fake: TFakeExecutor;
+  FakeIntf: ISQLExecutor;
+  Repo: TRepository<TPessoaNullable>;
+  P: TPessoaNullable;
+begin
+  Fake := TFakeExecutor.Create(dbPostgreSQL);
+  FakeIntf := Fake;
+  Fake.ScalarResult := 1;
+  P := TPessoaNullable.Create;
+  Repo := TRepository<TPessoaNullable>.Create(FakeIntf);
+  try
+    P.Nascimento := Null;
+    P.Pontos := Null;
+    Repo.Insert(P);
+    CheckTrue(ParamType(Fake.LastParams, 'p_nascimento') = ftDate,
+      '[Column(name, ftDate)] types a NULL Variant parameter');
+    CheckTrue(VarIsNull(ParamValue(Fake.LastParams, 'p_nascimento')),
+      'typed Variant parameter keeps NULL');
+    CheckTrue(ParamType(Fake.LastParams, 'p_pontos') = ftUnknown,
+      'Variant without hint stays ftUnknown');
+  finally
+    Repo.Free;
+    P.Free;
+    FakeIntf := nil;
+  end;
+end;
+
 procedure TestRepositoryPostgreSQLCaseFolding;
 var
   Fake: TFakeExecutor;
@@ -800,6 +845,7 @@ begin
   TestRepositoryQuoteToggle;
   TestRepositoryValueTypes;
   TestRepositoryPostgreSQLCaseFolding;
+  TestColumnDataTypeHint;
 
   Writeln('--------------------');
   Writeln(Format('%d checks, %d failures', [Checks, Failures]));

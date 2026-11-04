@@ -207,6 +207,7 @@ begin
   UpdateControls;
   SetStatus('Desconectado. Confira os dados de acesso e clique em "Conectar" ' +
     '(na primeira vez, use "Criar banco/tabela").');
+  Log('Aplicação iniciada...');
 end;
 
 procedure TfrmClientes.FormDestroy(Sender: TObject);

@@ -389,7 +389,9 @@ var
   DT: TFieldType;
 begin
   V := GetEntityValue(AEntity, APropMeta);
-  DT := FieldTypeFor(APropMeta.PropertyInfo.PropertyType);
+  DT := APropMeta.DataType; // [Column('x', ftTipo)] tem prioridade
+  if DT = ftUnknown then
+    DT := FieldTypeFor(APropMeta.PropertyInfo.PropertyType);
   if (DT = ftWideString) and VarIsStr(V) and (Length(VarToStr(V)) > MAX_WIDE_STRING_PARAM) then
     DT := ftWideMemo;
   Result := SQLParam(AName, V, DT);
@@ -412,8 +414,11 @@ end;
 
 function TRepository<T>.MakeKeyParam(const AName: string; const AValue: Variant): TSQLParam;
 begin
-  Result := SQLParam(AName, NormalizeKeyValue(AValue),
-    FieldTypeFor(FMeta.KeyProperty.PropertyInfo.PropertyType));
+  if FMeta.KeyProperty.DataType <> ftUnknown then
+    Result := SQLParam(AName, NormalizeKeyValue(AValue), FMeta.KeyProperty.DataType)
+  else
+    Result := SQLParam(AName, NormalizeKeyValue(AValue),
+      FieldTypeFor(FMeta.KeyProperty.PropertyInfo.PropertyType));
 end;
 
 function TRepository<T>.MSSQLKeyTypeName: string;

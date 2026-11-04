@@ -1157,6 +1157,8 @@ Cada parametro e enviado com o `TFieldType` correspondente ao tipo da propriedad
 | `TBytes` | `ftBlob` | blob | varbinary(max) | bytea |
 | `Variant` | inferido (NULL vira `ftWideString`) | qualquer | qualquer | qualquer |
 
+Para forcar o tipo de uma coluna, informe-o no atributo: `[Column('data_nascimento', ftDate)]` (requer `Data.DB` no `uses` do DTO). Isso e necessario em propriedades `Variant` que podem ser NULL no PostgreSQL, que rejeita um NULL enviado como texto numa coluna `DATE`/`INTEGER`/`NUMERIC`.
+
 O tipo e decidido pelo tipo *declarado* da propriedade (nao por `TValue.IsType`, que aceita tipos conversiveis e confundiria `Double` com `TDateTime`).
 
 ### Usando UniDAC
@@ -1485,6 +1487,7 @@ Detalhes completos em:
 | `Samples/Sample01.dpr` | VCL | Builder (varios dialetos) e `TRepository<T>` com MySQL, transacao e pool. |
 | `Samples/Sample02/` | VCL | Carrega a tabela `usuario` em grid a partir do SQL do builder (MySQL, SQL Server ou PostgreSQL). Scripts: `script-MySQL.sql`, `script-MSSQL.sql`, `script-PostgreSQL.sql`. |
 | `Samples/Sample04_MySQL_VCL/` | VCL | Cadastro de clientes completo em MySQL: cria banco/tabela, lista com filtro e paginacao (builder + `ToSQLCount`), `FindById`/`Insert`/`Update`/`DeleteById`, geracao de dados em transacao e log de todo SQL executado. |
+| `Samples/Sample06_DuasBases_VCL/` | VCL | Duas bases abertas ao mesmo tempo (MySQL e/ou PostgreSQL, escolhidas na tela), o mesmo DTO nas duas, copia de clientes entre bases (um ou todos, em transacao) e log de SQL por base. |
 | `Samples/Sample05_UniDAC/` | Console | Tutorial do FluentORM com **UniDAC** (MySQL, SQL Server, PostgreSQL): executor criando a conexao ou usando uma `TUniConnection` existente, CRUD em transacao, tipos, `FindById`/`FindAll` e builder com `TUniQuery`. Requer UniDAC; fora do `build.bat`. |
 | `Samples/Sample03_MultiBanco/` | Console | O mesmo codigo em MySQL, PostgreSQL (FireDAC) e SQL Server (ADO): CRUD em transacao, rollback automatico, mapeamento de tipos (`Int64`, `TGUID`, `Currency`, `Double`, `TDate`, `TBytes`, `Variant`), builder com paginacao e `ToSQLCount` lido com `OpenQuery`. Scripts em `scripts/` (o do SQL Server cria trigger). |
 

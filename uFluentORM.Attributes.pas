@@ -39,6 +39,9 @@ unit uFluentORM.Attributes;
 
 interface
 
+uses
+  Data.DB;
+
 type
   TableAttribute = class(TCustomAttribute)
   private
@@ -51,9 +54,18 @@ type
   ColumnAttribute = class(TCustomAttribute)
   private
     FName: string;
+    FDataType: TFieldType;
   public
-    constructor Create(const AName: string);
+    constructor Create(const AName: string); overload;
+    /// <summary>
+    /// Informa o tipo do parametro explicitamente. Util em propriedades Variant
+    /// que podem ser NULL: sem o tipo o parametro vai como texto, o que o
+    /// PostgreSQL rejeita em colunas date/integer/numeric...
+    /// Ex.: [Column('data_nascimento', ftDate)]  (requer Data.DB no uses do DTO)
+    /// </summary>
+    constructor Create(const AName: string; ADataType: TFieldType); overload;
     property Name: string read FName;
+    property DataType: TFieldType read FDataType;
   end;
 
   KeyAttribute = class(TCustomAttribute)
@@ -86,6 +98,14 @@ constructor ColumnAttribute.Create(const AName: string);
 begin
   inherited Create;
   FName := AName;
+  FDataType := ftUnknown;
+end;
+
+constructor ColumnAttribute.Create(const AName: string; ADataType: TFieldType);
+begin
+  inherited Create;
+  FName := AName;
+  FDataType := ADataType;
 end;
 
 { KeyAttribute }

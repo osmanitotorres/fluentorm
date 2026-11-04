@@ -50,6 +50,11 @@ Mostra ajuda dos parametros.
 ```bash
 FluentORM.DtoGenerator.exe --db=mysql --server=localhost --port=3306 --database=chat_database --user=root --password=admin --ado_provider_mysql=MSDASQL --mysql_odbc_driver="MySQL ODBC 8.0 Unicode Driver" --table=usuario --output=.\GeneratedDTOs
 ```
+ou
+
+```bash
+FluentORM.DtoGenerator.exe --db=mysql --server=localhost --port=3306 --database=fluentorm_demo --user=osmanito --password=root --ado_provider_mysql=MSDASQL --mysql_odbc_driver="MySQL ODBC 26.10 Unicode Driver" --table=usuario --output=.\GeneratedDTOs
+```
 
 ### MySQL (todas as tabelas)
 

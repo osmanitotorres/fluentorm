@@ -37,6 +37,7 @@ call :compile "%ROOT%\Tests\FluentORM.MSSQLSmoke.dpr"
 call :compile "%ROOT%\Tools\FluentORM.DtoGenerator\FluentORM.DtoGenerator.dpr"
 call :compile "%ROOT%\Samples\Sample03_MultiBanco\Sample03.dpr"
 call :compile "%ROOT%\Samples\Sample04_MySQL_VCL\Sample04.dpr"
+call :compile "%ROOT%\Samples\Sample06_DuasBases_VCL\Sample06.dpr"
 call :compile "%ROOT%\Samples\Sample02\Sample02.dpr"
 call :compile "%ROOT%\Samples\Sample01.dpr"
 
