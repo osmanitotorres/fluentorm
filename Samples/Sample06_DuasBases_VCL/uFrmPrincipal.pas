@@ -35,6 +35,10 @@ uses
   FireDAC.Phys.MySQLDef,
   FireDAC.Phys.PG,
   FireDAC.Phys.PGDef,
+  FireDAC.Phys.SQLite,
+  FireDAC.Phys.SQLiteDef,
+  FireDAC.Phys.SQLiteWrapper.Stat, // motor SQLite embutido no exe (sem sqlite3.dll)
+  FireDAC.Stan.ExprFuncs,
   FireDAC.VCLUI.Wait,
   FireDAC.Comp.UI,
   uFluentORM.Types,
@@ -71,6 +75,7 @@ type
   private
     FMySQLLink: TFDPhysMySQLDriverLink;
     FPgLink: TFDPhysPgDriverLink;
+    FSQLiteLink: TFDPhysSQLiteDriverLink;
     FWaitCursor: TFDGUIxWaitCursor;
     FBaseA: TfraBase;
     FBaseB: TfraBase;
@@ -113,6 +118,7 @@ begin
   FWaitCursor := TFDGUIxWaitCursor.Create(Self);
   FMySQLLink := TFDPhysMySQLDriverLink.Create(Self);
   FPgLink := TFDPhysPgDriverLink.Create(Self);
+  FSQLiteLink := TFDPhysSQLiteDriverLink.Create(Self); // SQLite: nenhuma DLL externa
   PreloadClientLibraries;
 
   // Duas instancias independentes do mesmo frame.

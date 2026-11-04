@@ -101,6 +101,7 @@ type
     procedure ApplyConnectionParams(const ADatabase: string);
     procedure Connect(ALoadList: Boolean);
     procedure CreateDatabaseIfMissing;
+    function SQLiteFileName: string;
     procedure LoadPage;
     procedure ConfigureGridFields;
     procedure UpdateControls;
@@ -154,20 +155,32 @@ begin
   FCode := ACode;
   FLog := ALog;
   pnlTitulo.Caption := '  Base ' + ACode;
-  if ADatabaseType = dbPostgreSQL then
-    cbBanco.ItemIndex := 1
+  case ADatabaseType of
+    dbPostgreSQL: cbBanco.ItemIndex := 1;
+    dbSQLite: cbBanco.ItemIndex := 2;
   else
     cbBanco.ItemIndex := 0;
+  end;
   ApplyDefaults;
   UpdateControls;
 end;
 
 function TfraBase.GetDatabaseType: TSQLDatabaseType;
 begin
-  if cbBanco.ItemIndex = 1 then
-    Result := dbPostgreSQL
+  case cbBanco.ItemIndex of
+    1: Result := dbPostgreSQL;
+    2: Result := dbSQLite;
   else
     Result := dbMySQL;
+  end;
+end;
+
+function TfraBase.SQLiteFileName: string;
+begin
+  // Caminho relativo = pasta do executavel.
+  Result := Trim(edtDatabase.Text);
+  if (Result <> '') and (ExtractFileDrive(Result) = '') and (Copy(Result, 1, 2) <> '\\') then
+    Result := ExtractFilePath(ParamStr(0)) + Result;
 end;
 
 function TfraBase.GetConnected: Boolean;
@@ -177,8 +190,11 @@ end;
 
 function TfraBase.Description: string;
 begin
-  Result := Format('Base %s (%s / %s)',
-    [FCode, DatabaseCaption(DatabaseType), Trim(edtDatabase.Text)]);
+  if DatabaseType = dbSQLite then
+    Result := Format('Base %s (SQLite / %s)', [FCode, ExtractFileName(SQLiteFileName)])
+  else
+    Result := Format('Base %s (%s / %s)',
+      [FCode, DatabaseCaption(DatabaseType), Trim(edtDatabase.Text)]);
 end;
 
 procedure TfraBase.DoLog(const AText: string);
@@ -194,20 +210,41 @@ begin
 end;
 
 procedure TfraBase.ApplyDefaults;
+var
+  IsFile: Boolean;
 begin
   edtServer.Text := 'localhost';
   edtDatabase.Text := 'fluentorm_sample06';
   edtPassword.Text := '';
-  if DatabaseType = dbPostgreSQL then
-  begin
-    edtPort.Text := '5432';
-    edtUser.Text := 'postgres';
-  end
+  case DatabaseType of
+    dbPostgreSQL:
+      begin
+        edtPort.Text := '5432';
+        edtUser.Text := 'postgres';
+      end;
+    dbSQLite:
+      begin
+        // Arquivo local (criado automaticamente na pasta do executavel).
+        edtServer.Text := '';
+        edtPort.Text := '';
+        edtUser.Text := '';
+        edtDatabase.Text := 'fluentorm_sample06.db';
+      end;
   else
-  begin
     edtPort.Text := '3306';
     edtUser.Text := 'osmanito';
   end;
+
+  // SQLite nao tem servidor/usuario/senha: o "banco" e um arquivo.
+  IsFile := DatabaseType = dbSQLite;
+  edtServer.Enabled := not IsFile;
+  edtPort.Enabled := not IsFile;
+  edtUser.Enabled := not IsFile;
+  edtPassword.Enabled := not IsFile;
+  if IsFile then
+    lblDatabase.Caption := 'Arquivo'
+  else
+    lblDatabase.Caption := 'Database';
 end;
 
 procedure TfraBase.cbBancoChange(Sender: TObject);
@@ -227,6 +264,18 @@ procedure TfraBase.ApplyConnectionParams(const ADatabase: string);
 begin
   FConnection.Connected := False;
   FConnection.Params.Clear;
+  if DatabaseType = dbSQLite then
+  begin
+    FConnection.Params.Values['DriverID'] := 'SQLite';
+    FConnection.Params.Values['Database'] := SQLiteFileName;
+    FConnection.Params.Values['OpenMode'] := 'CreateUTF8'; // cria o arquivo se nao existir
+    // O padrao do FireDAC e Exclusive: com Normal, as duas bases podem abrir
+    // o MESMO arquivo ao mesmo tempo.
+    FConnection.Params.Values['LockingMode'] := 'Normal';
+    FConnection.Params.Values['BusyTimeout'] := '5000';
+    FConnection.Params.Values['StringFormat'] := 'Unicode';
+    Exit;
+  end;
   if DatabaseType = dbPostgreSQL then
   begin
     FConnection.Params.Values['DriverID'] := 'PG';
@@ -251,6 +300,8 @@ var
   Logger: TLoggingExecutor;
 begin
   Disconnect;
+  if DatabaseType = dbSQLite then
+    ForceDirectories(ExtractFilePath(SQLiteFileName));
   ApplyConnectionParams(Trim(edtDatabase.Text));
   FConnection.Connected := True;
 
@@ -314,6 +365,15 @@ var
   DbName: string;
   Exists: Variant;
 begin
+  if DatabaseType = dbSQLite then
+  begin
+    // SQLite: o arquivo e criado na conexao (OpenMode=CreateUTF8).
+    Disconnect;
+    ForceDirectories(ExtractFilePath(SQLiteFileName));
+    DoLog(Format('[%s] SQLite: arquivo %s', [FCode, SQLiteFileName]));
+    Exit;
+  end;
+
   DbName := Trim(edtDatabase.Text);
   if not TSQLDialect.IsSimpleIdentifier(DbName) or (Pos('.', DbName) > 0) then
     raise Exception.Create('Nome de banco invalido: use letras minusculas, numeros e "_".');
@@ -362,7 +422,7 @@ begin
     CreateDatabaseIfMissing;
     Connect(False);
     FExecutor.Execute(CreateTableSQL(DatabaseType), []);
-    if DatabaseType = dbPostgreSQL then
+    if DatabaseType in [dbPostgreSQL, dbSQLite] then
       FExecutor.Execute('CREATE INDEX IF NOT EXISTS ix_cliente_nome ON cliente (nome)', []);
     LoadPage;
   finally

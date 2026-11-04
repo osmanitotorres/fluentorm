@@ -774,6 +774,56 @@ begin
   end;
 end;
 
+procedure TestSQLiteDialect;
+var
+  U1, U2: TSQLBuilder;
+  S: string;
+  Fake: TFakeExecutor;
+  FakeIntf: ISQLExecutor;
+  Repo: TRepository<TProduto>;
+  P: TProduto;
+begin
+  U1 := TSQLBuilder.Create;
+  U2 := TSQLBuilder.Create;
+  try
+    U1.SetDatabaseType(dbSQLite);
+    U2.SetDatabaseType(dbSQLite);
+    U1.Select.Fields(['id']).From('a');
+    U2.Select.Fields(['id']).From('b');
+    U1.Union(U2);
+    S := U1.ToSQL;
+    CheckContains('SELECT id FROM a UNION SELECT id FROM b', S,
+      'SQLite UNION has no parentheses around the SELECTs');
+    CheckNotContains('(SELECT', S, 'SQLite UNION does not start with "("');
+    S := U1.ToSQLCount;
+    CheckContains('SELECT COUNT(*) AS Total FROM (SELECT id FROM a UNION SELECT id FROM b) fluent_count',
+      S, 'SQLite UNION count is wrapped in a derived table');
+  finally
+    U1.Free;
+    U2.Free;
+  end;
+
+  Fake := TFakeExecutor.Create(dbSQLite);
+  FakeIntf := Fake;
+  Fake.IdentityResult := 3;
+  P := TProduto.Create;
+  Repo := TRepository<TProduto>.Create(FakeIntf);
+  try
+    P.Codigo := StringToGUID('{6F9619FF-8B86-D011-B42D-00C04FC964FF}');
+    Repo.Insert(P);
+    CheckContains('INSERT INTO "produto"', Fake.LastSQL, 'SQLite insert quotes with double quotes');
+    CheckNotContains('RETURNING', Fake.LastSQL, 'SQLite insert uses last_insert_rowid (no RETURNING)');
+    CheckEqualsStr('6F9619FF-8B86-D011-B42D-00C04FC964FF',
+      VarToStr(ParamValue(Fake.LastParams, 'p_codigo')), 'SQLite GUID is text without braces');
+    CheckTrue(ParamType(Fake.LastParams, 'p_codigo') = ftWideString, 'SQLite GUID param is a string');
+    CheckTrue(P.Id = 3, 'SQLite identity comes from the executor');
+  finally
+    Repo.Free;
+    P.Free;
+    FakeIntf := nil;
+  end;
+end;
+
 procedure TestColumnDataTypeHint;
 var
   Fake: TFakeExecutor;
@@ -846,6 +896,7 @@ begin
   TestRepositoryValueTypes;
   TestRepositoryPostgreSQLCaseFolding;
   TestColumnDataTypeHint;
+  TestSQLiteDialect;
 
   Writeln('--------------------');
   Writeln(Format('%d checks, %d failures', [Checks, Failures]));

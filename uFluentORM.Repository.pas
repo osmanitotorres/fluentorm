@@ -267,8 +267,8 @@ begin
     tkRecord:
       if TI = TypeInfo(TGUID) then
       begin
-        // MySQL has no uuid type: GUIDs are usually stored in CHAR(36).
-        if FDatabaseType = dbMySQL then
+        // MySQL and SQLite have no uuid type: GUIDs are stored as CHAR(36) text.
+        if FDatabaseType in [dbMySQL, dbSQLite] then
           Result := ftWideString
         else
           Result := ftGuid;
@@ -339,7 +339,7 @@ begin
       if TI = TypeInfo(TGUID) then
       begin
         G := AValue.AsType<TGUID>;
-        if FDatabaseType = dbMySQL then
+        if FDatabaseType in [dbMySQL, dbSQLite] then
           Result := Copy(GUIDToString(G), 2, 36) // CHAR(36), without braces
         else
           Result := GUIDToString(G);
@@ -402,8 +402,8 @@ var
   S: string;
 begin
   Result := AValue;
-  // GUID keys passed as '{...}' to DeleteById on MySQL (CHAR(36) column).
-  if FMeta.HasKey and (FDatabaseType = dbMySQL) and VarIsStr(AValue) and
+  // GUID keys passed as '{...}' to DeleteById on MySQL/SQLite (CHAR(36) column).
+  if FMeta.HasKey and (FDatabaseType in [dbMySQL, dbSQLite]) and VarIsStr(AValue) and
      (FMeta.KeyProperty.PropertyInfo.PropertyType.Handle = TypeInfo(TGUID)) then
   begin
     S := Trim(VarToStr(AValue));

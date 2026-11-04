@@ -2364,7 +2364,12 @@ begin
     Body := BaseSQL
   else
   begin
-    Body := '(' + BaseSQL + ')';
+    // SQLite nao aceita parenteses em volta dos SELECTs de um UNION/INTERSECT/
+    // EXCEPT ("(SELECT ...) UNION (SELECT ...)" e erro de sintaxe).
+    if FDatabaseType = dbSQLite then
+      Body := BaseSQL
+    else
+      Body := '(' + BaseSQL + ')';
     for I := 0 to FUnions.Count - 1 do
     begin
       UnionSQL := StripEndingSemicolon(FUnions[I].SQL);
@@ -2389,7 +2394,10 @@ begin
       if FUnions[I].IsAll then
         UnionWord := UnionWord + ' ALL';
       UnionWord := UnionWord + ' ';
-      Body := Body + UnionWord + '(' + UnionSQL + ')';
+      if FDatabaseType = dbSQLite then
+        Body := Body + UnionWord + UnionSQL
+      else
+        Body := Body + UnionWord + '(' + UnionSQL + ')';
     end;
   end;
 

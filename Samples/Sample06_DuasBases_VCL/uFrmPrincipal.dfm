@@ -32,7 +32,7 @@ object frmPrincipal: TfrmPrincipal
       Width = 700
       Height = 15
       Caption = 
-        'Cada lado e uma conexao independente. Escolha MySQL ou PostgreSQL ' +
+        'Cada lado e uma conexao independente. Escolha MySQL, PostgreSQL ou SQLite ' +
         'em cada base, conecte as duas e use os botoes do meio para copiar ' +
         'clientes entre elas.'
     end

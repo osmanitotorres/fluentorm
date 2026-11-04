@@ -98,7 +98,8 @@ object fraBase: TfraBase
       OnChange = cbBancoChange
       Items.Strings = (
         'MySQL'
-        'PostgreSQL')
+        'PostgreSQL'
+        'SQLite')
     end
     object edtServer: TEdit
       Left = 114

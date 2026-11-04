@@ -1,7 +1,7 @@
-# Sample06 - Duas bases ao mesmo tempo (VCL + FireDAC: MySQL / PostgreSQL)
+# Sample06 - Duas bases ao mesmo tempo (VCL + FireDAC: MySQL / PostgreSQL / SQLite)
 
 Formulario com duas areas independentes, **Base A** e **Base B**. Em cada uma voce
-escolhe o banco (MySQL ou PostgreSQL), conecta, cria a estrutura e manipula os
+escolhe o banco (MySQL, PostgreSQL ou SQLite), conecta, cria a estrutura e manipula os
 dados. Com as duas conectadas, os botoes do meio copiam clientes de uma base
 para a outra.
 
@@ -22,6 +22,17 @@ chave gerada com `LAST_INSERT_ID()` no MySQL e `RETURNING` no PostgreSQL, tipos
 5. Pesquisa (sem diferenca de maiusculas nos dois bancos), *Somente ativos*,
    paginacao, *Editar nome* e *Excluir* em cada lado.
 6. Tambem funciona com os dois lados no mesmo banco (ex.: duas databases MySQL).
+7. **SQLite**: escolha "SQLite" em um dos lados. Nao ha servidor, usuario nem
+   senha: o campo *Arquivo* indica o arquivo `.db` (caminho relativo = pasta do
+   exe), criado automaticamente ao conectar. Teste, por exemplo,
+   *Base A = SQLite* e *Base B = PostgreSQL* e copie os clientes entre elas.
+
+### SQLite
+
+- Motor embutido no executavel (`FireDAC.Phys.SQLiteWrapper.Stat`): nao precisa de `sqlite3.dll`.
+- Conexao aberta com `LockingMode=Normal`, para que as duas bases possam usar o mesmo arquivo ao mesmo tempo (o padrao do FireDAC, `Exclusive`, bloquearia a segunda).
+- Chave gerada lida com `SELECT last_insert_rowid()` na mesma conexao.
+- `TGUID` e gravado como texto de 36 caracteres (o SQLite nao tem tipo uuid).
 
 O log da parte de baixo mostra todo o SQL executado, com o prefixo da base
 (`[A/MySQL]`, `[B/PostgreSQL]`) e os valores dos parametros.
@@ -34,6 +45,7 @@ O log da parte de baixo mostra todo o SQL executado, com o prefixo da base
 - O botao *Criar banco/tabela* cria o database e a tabela. Se preferir, rode
   `script-mysql.sql` / `script-postgresql.sql`.
 - Usuarios padrao: `osmanito` (MySQL) e `postgres` (PostgreSQL). A senha e digitada na tela.
+- SQLite: arquivo padrao `fluentorm_sample06.db`, na pasta do executavel.
 
 ## DLLs cliente
 

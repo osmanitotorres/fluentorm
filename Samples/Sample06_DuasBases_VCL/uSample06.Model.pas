@@ -137,6 +137,21 @@ end;
 function CreateTableSQL(ADatabaseType: TSQLDatabaseType): string;
 begin
   case ADatabaseType of
+    dbSQLite:
+      // Tipos declarados (BOOLEAN, DATE, DECIMAL...) orientam o mapeamento do
+      // FireDAC; o SQLite em si aceita qualquer valor em qualquer coluna.
+      Result :=
+        'CREATE TABLE IF NOT EXISTS cliente (' + sLineBreak +
+        '  id              INTEGER PRIMARY KEY AUTOINCREMENT,' + sLineBreak +
+        '  nome            VARCHAR(100)  NOT NULL,' + sLineBreak +
+        '  email           VARCHAR(120)  NULL,' + sLineBreak +
+        '  cpf             VARCHAR(14)   NULL,' + sLineBreak +
+        '  data_nascimento DATE          NULL,' + sLineBreak +
+        '  limite_credito  DECIMAL(12,2) NOT NULL DEFAULT 0,' + sLineBreak +
+        '  ativo           BOOLEAN       NOT NULL DEFAULT 1,' + sLineBreak +
+        '  origem          VARCHAR(40)   NULL,' + sLineBreak +
+        '  criado_em       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP' + sLineBreak +
+        ')';
     dbPostgreSQL:
       Result :=
         'CREATE TABLE IF NOT EXISTS cliente (' + sLineBreak +

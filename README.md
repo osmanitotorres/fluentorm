@@ -1122,6 +1122,7 @@ Regras de geracao:
   - `dbMSSQL`: `OFFSET ... ROWS FETCH NEXT ... ROWS ONLY`.
 - No MSSQL, quando ha paginacao sem ordenacao explicita, o builder injeta `ORDER BY (SELECT NULL)`; em consultas com `UNION` usa `ORDER BY 1` (o SQL Server nao aceita `(SELECT NULL)` nesse caso).
 - `FULL JOIN` nao existe no MySQL: o builder lanca excecao e sugere `LEFT/RIGHT JOIN` + `UNION`.
+- SQLite: `UNION`/`INTERSECT`/`EXCEPT` sao gerados sem parenteses em volta de cada `SELECT` (o SQLite nao aceita `(SELECT ...) UNION (SELECT ...)`); `TGUID` vai como texto de 36 caracteres; a chave gerada vem de `last_insert_rowid()`. Com FireDAC, inclua `FireDAC.Phys.SQLite` e `FireDAC.Phys.SQLiteWrapper.Stat` (motor embutido, sem DLL).
 - `INTERSECT`/`EXCEPT` exigem MySQL 8.0.31+; CTE (`WITH`) exige MySQL 8.0+ e SQL Server 2005+.
 - `LIKE` diferencia maiusculas/minusculas no PostgreSQL; no MySQL e no SQL Server depende da collation da coluna.
 - CTE recursiva: `WITH RECURSIVE` nos bancos que suportam; no SQL Server apenas `WITH`.
@@ -1153,7 +1154,7 @@ Cada parametro e enviado com o `TFieldType` correspondente ao tipo da propriedad
 | `Currency` | `ftBCD` | decimal | decimal | numeric |
 | `TDateTime` / `TDate` / `TTime` | `ftDateTime` / `ftDate` / `ftTime` | datetime/date/time | datetime2/date/time | timestamp/date/time |
 | `string` | `ftWideString` (`ftWideMemo` acima de 4000 caracteres) | varchar/text | nvarchar | varchar/text |
-| `TGUID` | `ftWideString` sem chaves (CHAR(36)) | char(36) | uniqueidentifier (`ftGuid`) | uuid (`ftGuid`) |
+| `TGUID` | `ftWideString` sem chaves (CHAR(36)) no MySQL/SQLite | char(36) | uniqueidentifier (`ftGuid`) | uuid (`ftGuid`) |
 | `TBytes` | `ftBlob` | blob | varbinary(max) | bytea |
 | `Variant` | inferido (NULL vira `ftWideString`) | qualquer | qualquer | qualquer |
 
@@ -1487,7 +1488,7 @@ Detalhes completos em:
 | `Samples/Sample01.dpr` | VCL | Builder (varios dialetos) e `TRepository<T>` com MySQL, transacao e pool. |
 | `Samples/Sample02/` | VCL | Carrega a tabela `usuario` em grid a partir do SQL do builder (MySQL, SQL Server ou PostgreSQL). Scripts: `script-MySQL.sql`, `script-MSSQL.sql`, `script-PostgreSQL.sql`. |
 | `Samples/Sample04_MySQL_VCL/` | VCL | Cadastro de clientes completo em MySQL: cria banco/tabela, lista com filtro e paginacao (builder + `ToSQLCount`), `FindById`/`Insert`/`Update`/`DeleteById`, geracao de dados em transacao e log de todo SQL executado. |
-| `Samples/Sample06_DuasBases_VCL/` | VCL | Duas bases abertas ao mesmo tempo (MySQL e/ou PostgreSQL, escolhidas na tela), o mesmo DTO nas duas, copia de clientes entre bases (um ou todos, em transacao) e log de SQL por base. |
+| `Samples/Sample06_DuasBases_VCL/` | VCL | Duas bases abertas ao mesmo tempo (MySQL, PostgreSQL e/ou SQLite, escolhidas na tela), o mesmo DTO nas duas, copia de clientes entre bases (um ou todos, em transacao) e log de SQL por base. |
 | `Samples/Sample05_UniDAC/` | Console | Tutorial do FluentORM com **UniDAC** (MySQL, SQL Server, PostgreSQL): executor criando a conexao ou usando uma `TUniConnection` existente, CRUD em transacao, tipos, `FindById`/`FindAll` e builder com `TUniQuery`. Requer UniDAC; fora do `build.bat`. |
 | `Samples/Sample03_MultiBanco/` | Console | O mesmo codigo em MySQL, PostgreSQL (FireDAC) e SQL Server (ADO): CRUD em transacao, rollback automatico, mapeamento de tipos (`Int64`, `TGUID`, `Currency`, `Double`, `TDate`, `TBytes`, `Variant`), builder com paginacao e `ToSQLCount` lido com `OpenQuery`. Scripts em `scripts/` (o do SQL Server cria trigger). |
 
